@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  terraform:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.16.2
+      - name: Check formatting
+        run: terraform -chdir=terraform fmt -check -diff -recursive
+      # No credentials and no state: validate only needs the provider schema.
+      - name: Validate
+        run: |
+          terraform -chdir=terraform init -backend=false -input=false
+          terraform -chdir=terraform validate
+
+  ansible:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      - run: pip install ansible-lint
+      # The playbooks read secrets.yml, which is git-ignored; the example file
+      # has the same keys with placeholder values.
+      - name: Provide placeholder secrets
+        run: cp ansible/secrets.example.yml ansible/secrets.yml
+      - name: Lint playbooks and roles
+        run: ansible-lint --nocolor site.yml school.yml
+        working-directory: ansible
+
+  shell:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      # Every script, but not the systemd units next to them. SC1091: the
+      # scripts source /etc/…/env, which only exists on the server.
+      - name: Check backup scripts
+        run: shellcheck -e SC1091 $(grep -rl '^#!/bin/bash' ansible/roles/*/files)

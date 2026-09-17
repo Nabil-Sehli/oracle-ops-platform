@@ -1,0 +1,11 @@
+[Unit]
+Description=Restore drill: restore and verify the latest backup
+Wants=network-online.target
+After=network-online.target
+OnFailure=ops-alert@%N.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/ops-restore-drill
+Nice=10
+IOSchedulingClass=idle

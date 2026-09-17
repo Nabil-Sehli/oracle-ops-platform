@@ -1,0 +1,11 @@
+[Unit]
+Description=Nightly off-site backup
+
+[Timer]
+OnCalendar=*-*-* {{ backup_time }}
+RandomizedDelaySec=10min
+# Runs at boot if the server was off at backup time.
+Persistent=true
+
+[Install]
+WantedBy=timers.target

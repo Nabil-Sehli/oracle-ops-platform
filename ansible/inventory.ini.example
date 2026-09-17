@@ -1,0 +1,7 @@
+# Copy to inventory.ini and use the public_ip output from terraform.
+[ops]
+ops-server ansible_host=203.0.113.10
+
+# Language school production server, used only by school.yml.
+[school]
+school-server ansible_host=203.0.113.20 ansible_ssh_private_key_file=/root/.ssh/id_ed25519

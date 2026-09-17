@@ -1,0 +1,6 @@
+#!/bin/bash
+# restic with the ops repository settings, e.g. sudo ops-restic snapshots
+set -a
+. /etc/ops-backup/env
+set +a
+exec restic "$@"

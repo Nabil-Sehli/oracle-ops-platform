@@ -1,0 +1,13 @@
+# Environment files are read only when a container is created.
+- name: Recreate n8n
+  ansible.builtin.command: docker compose up -d --force-recreate n8n
+  args:
+    chdir: "{{ stack_dir }}"
+  changed_when: true
+
+# Graceful: no dropped connections, and a broken config keeps the old one running.
+- name: Reload caddy
+  ansible.builtin.command: docker compose exec -T caddy caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile
+  args:
+    chdir: "{{ stack_dir }}"
+  changed_when: true

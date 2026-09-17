@@ -1,0 +1,64 @@
+- name: Install restic and sqlite3
+  ansible.builtin.apt:
+    name: [restic, sqlite3]
+    state: present
+
+- name: Create backup config directory
+  ansible.builtin.file:
+    path: /etc/ops-backup
+    state: directory
+    mode: "0700"
+
+- name: Write backup environment (repository, keys, alert targets)
+  ansible.builtin.template:
+    src: env.j2
+    dest: /etc/ops-backup/env
+    mode: "0600"
+  no_log: true
+
+- name: Install backup scripts
+  ansible.builtin.copy:
+    src: "{{ item }}"
+    dest: /usr/local/sbin/{{ item }}
+    mode: "0755"
+  loop: [ops-restic, ops-telegram, ops-backup, ops-restore-drill]
+
+- name: Install systemd services
+  ansible.builtin.copy:
+    src: "{{ item }}"
+    dest: /etc/systemd/system/{{ item }}
+    mode: "0644"
+  loop: [ops-alert@.service, ops-backup.service, ops-restore-drill.service]
+  notify: Reload systemd
+
+- name: Install systemd timers
+  ansible.builtin.template:
+    src: "{{ item }}.j2"
+    dest: /etc/systemd/system/{{ item }}
+    mode: "0644"
+  loop: [ops-backup.timer, ops-restore-drill.timer]
+  notify: Reload systemd
+
+- name: Apply systemd changes before enabling timers
+  ansible.builtin.meta: flush_handlers
+
+# "cat config" fails on an empty bucket. It also fails on a wrong password or
+# no network, but then init refuses too, so nothing gets overwritten.
+- name: Check for an existing restic repository
+  ansible.builtin.command: /usr/local/sbin/ops-restic cat config
+  register: backup_restic_repo
+  changed_when: false
+  failed_when: false
+  check_mode: false  # read-only; --check would otherwise skip it and break the next task
+
+- name: Initialize the restic repository
+  ansible.builtin.command: /usr/local/sbin/ops-restic init
+  changed_when: true
+  when: backup_restic_repo.rc != 0
+
+- name: Enable backup and restore drill timers
+  ansible.builtin.systemd_service:
+    name: "{{ item }}"
+    enabled: true
+    state: started
+  loop: [ops-backup.timer, ops-restore-drill.timer]

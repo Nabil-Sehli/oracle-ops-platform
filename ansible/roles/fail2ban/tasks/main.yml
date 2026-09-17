@@ -1,0 +1,17 @@
+- name: Install fail2ban
+  ansible.builtin.apt:
+    name: fail2ban
+    state: present
+
+- name: Configure jails
+  ansible.builtin.copy:
+    src: jail.local
+    dest: /etc/fail2ban/jail.local
+    mode: "0644"
+  notify: Restart fail2ban
+
+- name: Start fail2ban
+  ansible.builtin.service:
+    name: fail2ban
+    state: started
+    enabled: true

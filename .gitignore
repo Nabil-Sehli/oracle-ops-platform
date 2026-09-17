@@ -1,0 +1,12 @@
+terraform.tfvars
+*.tfstate
+*.tfstate.*
+.terraform/
+.terraform.lock.hcl
+*.pem
+ansible/inventory.ini
+tfplan
+ansible/secrets.yml
+
+# Personal working notes: server IPs, chat IDs, account details.
+HANDOFF.md

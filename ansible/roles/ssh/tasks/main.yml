@@ -1,0 +1,7 @@
+- name: Harden sshd
+  ansible.builtin.copy:
+    src: 10-hardening.conf
+    dest: /etc/ssh/sshd_config.d/10-hardening.conf
+    mode: "0644"
+    validate: /usr/sbin/sshd -t -f %s
+  notify: Reload sshd

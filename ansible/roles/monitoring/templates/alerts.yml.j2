@@ -1,0 +1,58 @@
+# Managed by Ansible. Alerts go to Telegram through Alertmanager.
+# Website uptime is Uptime Kuma's job; these cover the server itself.
+groups:
+  - name: host
+    rules:
+      - alert: DiskAlmostFull
+        expr: 1 - node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"} > 0.80
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "Disk / is {{ '{{' }} $value | humanizePercentage {{ '}}' }} full on {{ '{{' }} $labels.instance {{ '}}' }}"
+
+      - alert: DiskFillingUp
+        expr: predict_linear(node_filesystem_avail_bytes{mountpoint="/"}[6h], 24 * 3600) < 0
+        for: 1h
+        labels: { severity: warning }
+        annotations:
+          summary: "Disk / on {{ '{{' }} $labels.instance {{ '}}' }} will be full within 24 hours at the current rate"
+
+      - alert: MemoryHigh
+        expr: 1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes > 0.90
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "Memory use is {{ '{{' }} $value | humanizePercentage {{ '}}' }} on {{ '{{' }} $labels.instance {{ '}}' }}"
+
+      - alert: OutOfMemoryKill
+        expr: increase(node_vmstat_oom_kill[15m]) > 0
+        labels: { severity: critical }
+        annotations:
+          summary: "The kernel killed a process for lack of memory on {{ '{{' }} $labels.instance {{ '}}' }}"
+
+      - alert: CpuBusy
+        expr: avg by (instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) < 0.10
+        for: 15m
+        labels: { severity: warning }
+        annotations:
+          summary: "CPU has been over 90% busy for 15 minutes on {{ '{{' }} $labels.instance {{ '}}' }}"
+
+  - name: containers
+    rules:
+{% for name in monitored_containers %}
+      - alert: ContainerMissing
+        expr: absent_over_time(container_last_seen{name="ops-{{ name }}-1"}[2m])
+        for: 3m
+        labels: { severity: critical, container: {{ name }} }
+        annotations:
+          summary: "Container {{ name }} is not running"
+{% endfor %}
+
+  - name: monitoring
+    rules:
+      - alert: ScrapeTargetDown
+        expr: up == 0
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "Prometheus can't scrape {{ '{{' }} $labels.job {{ '}}' }} ({{ '{{' }} $labels.instance {{ '}}' }})"

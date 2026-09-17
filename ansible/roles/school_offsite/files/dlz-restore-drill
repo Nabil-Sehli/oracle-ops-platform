@@ -1,0 +1,39 @@
+#!/bin/bash
+# Monthly restore drill: downloads the newest dump and uploads archive from B2
+# and proves they are readable. Doesn't touch the live database.
+set -euo pipefail
+. /etc/dlz-offsite/env
+
+DRILL=$(mktemp -d /var/tmp/dlz-restore-drill.XXXXXX)
+trap 'rm -rf "$DRILL"' EXIT
+
+dlz-restic check --read-data-subset=10%
+dlz-restic restore latest --tag nightly --target "$DRILL"
+
+restored="$DRILL$BACKUP_DIR"
+# Date-stamped names, so the last one by name is the newest.
+dump=$(printf '%s\n' "$restored"/*.sql.gz | sort | tail -1)
+uploads=$(printf '%s\n' "$restored"/uploads_*.tar.gz | sort | tail -1)
+[ -f "$dump" ] || { echo "no dump in the restored backup"; exit 1; }
+[ -f "$uploads" ] || uploads=
+
+gzip -t "$dump"
+# mysqldump writes this as its last line only when it finished.
+zcat "$dump" | tail -1 | grep -q "Dump completed" \
+  || { echo "dump is incomplete: $dump"; exit 1; }
+tables=$(zcat "$dump" | grep -c "^CREATE TABLE")
+
+if [ -n "$uploads" ]; then
+  files=$(tar -tzf "$uploads" | grep -vc '/$' || true)
+  uploads_msg="uploads archive $(basename "$uploads"): $files files"
+else
+  uploads_msg="no uploads archive in the backup"
+fi
+
+snapshot=$(dlz-restic snapshots latest --tag nightly --json \
+  | python3 -c 'import json, sys; s = json.load(sys.stdin)[0]; print(s["short_id"], s["time"][:16].replace("T", " "))')
+
+dlz-telegram "✅ School restore drill passed on $(hostname)
+Snapshot $snapshot restored, 10% of repository data re-verified.
+Dump $(basename "$dump"): complete, $tables tables.
+${uploads_msg}."

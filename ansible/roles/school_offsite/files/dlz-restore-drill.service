@@ -1,0 +1,12 @@
+[Unit]
+Description=Restore drill: download and verify the latest DLZ off-site backup
+Wants=network-online.target
+After=network-online.target
+OnFailure=dlz-alert@%N.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/dlz-restore-drill
+Nice=10
+IOSchedulingClass=idle
+TimeoutStartSec=2h

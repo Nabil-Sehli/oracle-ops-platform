@@ -1,0 +1,40 @@
+- name: Add Docker apt repository
+  ansible.builtin.deb822_repository:
+    name: docker
+    types: deb
+    uris: https://download.docker.com/linux/ubuntu
+    suites: "{{ ansible_distribution_release }}"
+    components: stable
+    architectures: "{{ 'arm64' if ansible_architecture == 'aarch64' else 'amd64' }}"
+    signed_by: https://download.docker.com/linux/ubuntu/gpg
+  register: docker_repo
+
+- name: Refresh apt cache for the new repository
+  ansible.builtin.apt:
+    update_cache: true
+  when: docker_repo.changed
+
+- name: Install Docker Engine and Compose
+  ansible.builtin.apt:
+    name: [docker-ce, docker-ce-cli, containerd.io, docker-buildx-plugin, docker-compose-plugin]
+    state: present
+
+# Without rotation, container logs grow until the disk is full.
+- name: Rotate container logs
+  ansible.builtin.copy:
+    src: daemon.json
+    dest: /etc/docker/daemon.json
+    mode: "0644"
+  notify: Restart docker
+
+- name: Start Docker
+  ansible.builtin.service:
+    name: docker
+    state: started
+    enabled: true
+
+- name: Let ubuntu run docker without sudo
+  ansible.builtin.user:
+    name: ubuntu
+    groups: docker
+    append: true

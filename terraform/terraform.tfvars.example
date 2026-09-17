@@ -1,0 +1,17 @@
+// Copy to terraform.tfvars and fill in. terraform.tfvars is gitignored:
+// it names your tenancy, your user and the path to a private key.
+
+tenancy_ocid     = "ocid1.tenancy.oc1..REPLACE"
+user_ocid        = "ocid1.user.oc1..REPLACE"
+fingerprint      = "aa:bb:cc:dd:ee:ff:00:11:22:33:44:55:66:77:88:99"
+private_key_path = "C:/Users/nabil/.oci/oci_api_key.pem"
+region           = "eu-frankfurt-1"
+
+// Root compartment: the same value as tenancy_ocid.
+compartment_ocid = "ocid1.tenancy.oc1..REPLACE"
+
+// ssh-keygen -t ed25519 -C "ops-platform" -f ~/.ssh/ops_platform
+ssh_public_key = "ssh-ed25519 AAAA... ops-platform"
+
+// curl -s https://api.ipify.org  -> append /32
+my_ip_cidr = "1.2.3.4/32"

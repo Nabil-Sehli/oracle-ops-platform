@@ -1,0 +1,12 @@
+[Unit]
+Description=Upload the DLZ backups to Backblaze B2
+Wants=network-online.target
+After=network-online.target
+OnFailure=dlz-alert@%N.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/dlz-offsite
+Nice=10
+IOSchedulingClass=idle
+TimeoutStartSec=2h

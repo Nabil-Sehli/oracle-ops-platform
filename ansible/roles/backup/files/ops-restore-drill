@@ -1,0 +1,31 @@
+#!/bin/bash
+# Monthly restore drill: proves the latest backup can actually be read back.
+# Run by ops-restore-drill.timer. By hand: sudo systemctl start ops-restore-drill
+set -euo pipefail
+
+DRILL=$(mktemp -d /var/tmp/ops-restore-drill.XXXXXX)
+trap 'rm -rf "$DRILL"' EXIT
+
+# Re-downloads and verifies a tenth of the stored data each month.
+ops-restic check --read-data-subset=10%
+ops-restic restore latest --tag nightly --target "$DRILL"
+
+DB=$DRILL/var/backups/ops-sqlite
+for db in "$DB/n8n/database.sqlite" "$DB/uptime-kuma/kuma.db"; do
+  result=$(sqlite3 "$db" "PRAGMA integrity_check")
+  [ "$result" = ok ] || { echo "integrity check failed for $db: $result"; exit 1; }
+done
+grep -q '^N8N_ENCRYPTION_KEY=.' "$DRILL/opt/ops/n8n.env" \
+  || { echo "N8N_ENCRYPTION_KEY missing from restored n8n.env"; exit 1; }
+test -d "$DRILL/var/lib/docker/volumes/ops_caddy_data/_data/caddy" \
+  || { echo "Caddy data missing from backup"; exit 1; }
+
+workflows=$(sqlite3 "$DB/n8n/database.sqlite" "SELECT count(*) FROM workflow_entity")
+monitors=$(sqlite3 "$DB/uptime-kuma/kuma.db" "SELECT count(*) FROM monitor")
+snapshot=$(ops-restic snapshots latest --tag nightly --json \
+  | python3 -c 'import json, sys; s = json.load(sys.stdin)[0]; print(s["short_id"], s["time"][:16].replace("T", " "))')
+
+ops-telegram "✅ Monthly restore drill passed on $(hostname)
+Snapshot $snapshot restored, 10% of repository data re-verified.
+n8n: $workflows workflows, Kuma: $monitors monitors, both databases intact.
+n8n encryption key and Caddy certificates present."

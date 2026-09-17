@@ -1,0 +1,11 @@
+[Unit]
+Description=Off-site backup of the ops stack to Backblaze B2
+Wants=network-online.target
+After=network-online.target docker.service
+OnFailure=ops-alert@%N.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/ops-backup
+Nice=10
+IOSchedulingClass=idle

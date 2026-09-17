@@ -1,0 +1,8 @@
+#!/bin/bash
+# Sends one message to the ops Telegram chat: dlz-telegram "text"
+set -euo pipefail
+. /etc/dlz-offsite/env
+curl -fsS -m 20 --retry 3 -o /dev/null \
+  "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+  --data-urlencode "chat_id=${TELEGRAM_CHAT_ID}" \
+  --data-urlencode "text=$1"

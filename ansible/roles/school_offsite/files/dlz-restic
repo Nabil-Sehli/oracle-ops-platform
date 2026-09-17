@@ -1,0 +1,6 @@
+#!/bin/bash
+# restic with the school repository settings, e.g. sudo dlz-restic snapshots
+set -a
+. /etc/dlz-offsite/env
+set +a
+exec restic "$@"

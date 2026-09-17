@@ -1,0 +1,64 @@
+# Managed by Ansible. Caddy fetches and renews the Let's Encrypt certificates.
+
+{{ base_domain }} {
+	respond "ops platform - status page coming soon" 200
+}
+
+n8n.{{ base_domain }} {
+	encode zstd gzip
+
+	# The editor sits behind a second login. Webhooks and forms stay public,
+	# because the services that call them can't log in.
+	# /healthz is public so the status page can check n8n from outside.
+	@editor not path /webhook/* /webhook-test/* /webhook-waiting/* /form/* /form-test/* /form-waiting/* /healthz
+	basic_auth @editor {
+		{{ n8n_basic_auth_user }} {{ n8n_basic_auth_hash }}
+	}
+
+	# Webhooks spend LLM quota and send emails, so callers need the shared
+	# secret. Rejected here, before n8n starts an execution.
+	@webhook_no_secret {
+		path /webhook/* /webhook-test/*
+		not header X-Webhook-Secret {{ n8n_webhook_secret }}
+	}
+	respond @webhook_no_secret "missing or wrong X-Webhook-Secret header" 401
+
+	@webhook path /webhook/* /webhook-test/*
+	request_body @webhook {
+		max_size 1MB
+	}
+
+	reverse_proxy n8n:5678
+}
+
+# Public status page. Uptime Kuma's admin UI talks over socket.io, so blocking
+# it here leaves only the read-only status page reachable on this host.
+status.{{ base_domain }} {
+	encode zstd gzip
+	@admin path /socket.io/* /metrics* /setup-database*
+	respond @admin 404
+	redir / /status/{{ status_page_slug }} 302
+	reverse_proxy uptime-kuma:3001
+}
+
+# Grafana, behind the same outer login as n8n, then its own admin login.
+grafana.{{ base_domain }} {
+	encode zstd gzip
+	basic_auth {
+		{{ n8n_basic_auth_user }} {{ n8n_basic_auth_hash }}
+	}
+	# The browser resends the Caddy login on every request; Grafana would treat
+	# it as a failed login of its own.
+	reverse_proxy grafana:3000 {
+		header_up -Authorization
+	}
+}
+
+# Uptime Kuma admin, behind the same outer login as n8n.
+kuma.{{ base_domain }} {
+	encode zstd gzip
+	basic_auth {
+		{{ n8n_basic_auth_user }} {{ n8n_basic_auth_hash }}
+	}
+	reverse_proxy uptime-kuma:3001
+}

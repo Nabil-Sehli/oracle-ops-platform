@@ -1,0 +1,15 @@
+# Managed by Ansible.
+route:
+  receiver: telegram
+  group_by: [alertname, container]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 12h
+
+receivers:
+  - name: telegram
+    telegram_configs:
+      - bot_token: "{{ telegram_bot_token }}"
+        chat_id: {{ telegram_chat_id }}
+        parse_mode: HTML
+        send_resolved: true

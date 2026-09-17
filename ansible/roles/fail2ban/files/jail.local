@@ -1,0 +1,10 @@
+# Managed by Ansible.
+[DEFAULT]
+backend = systemd
+bantime = 1h
+bantime.increment = true
+findtime = 10m
+maxretry = 5
+
+[sshd]
+enabled = true

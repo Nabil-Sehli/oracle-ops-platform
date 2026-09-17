@@ -1,0 +1,65 @@
+# Config for the monitoring containers, which live in the stack role's compose
+# file. Runs before the stack role, so the files exist when compose starts them.
+- name: Create monitoring directories
+  ansible.builtin.file:
+    path: "{{ stack_dir }}/monitoring/{{ item }}"
+    state: directory
+    mode: "0755"
+  loop:
+    - prometheus
+    - alertmanager
+    - grafana/provisioning/datasources
+    - grafana/provisioning/dashboards
+    - grafana/provisioning/plugins    # empty; stops startup errors
+    - grafana/provisioning/alerting
+    - grafana/dashboards
+
+- name: Write Prometheus config and alert rules
+  ansible.builtin.template:
+    src: "{{ item }}.j2"
+    dest: "{{ stack_dir }}/monitoring/prometheus/{{ item }}"
+    mode: "0644"
+  loop: [prometheus.yml, alerts.yml]
+  notify: Reload prometheus
+
+# Holds the bot token. Alertmanager runs as nobody (65534).
+- name: Write Alertmanager config
+  ansible.builtin.template:
+    src: alertmanager.yml.j2
+    dest: "{{ stack_dir }}/monitoring/alertmanager/alertmanager.yml"
+    owner: root
+    group: "65534"
+    mode: "0640"
+  notify: Reload alertmanager
+
+- name: Write Grafana environment
+  ansible.builtin.template:
+    src: grafana.env.j2
+    dest: "{{ stack_dir }}/grafana.env"
+    mode: "0600"
+  notify: Recreate grafana
+
+- name: Provision Grafana data source and dashboard folder
+  ansible.builtin.copy:
+    src: "{{ item.src }}"
+    dest: "{{ stack_dir }}/monitoring/grafana/provisioning/{{ item.dest }}"
+    mode: "0644"
+  loop:
+    - { src: datasource.yml, dest: datasources/prometheus.yml }
+    - { src: dashboards.yml, dest: dashboards/ops.yml }
+  notify: Restart grafana
+
+- name: Install the containers dashboard
+  ansible.builtin.copy:
+    src: containers-dashboard.json
+    dest: "{{ stack_dir }}/monitoring/grafana/dashboards/containers.json"
+    mode: "0644"
+
+# Pinned revision: "latest" would change the dashboard under us.
+- name: Download the Node Exporter Full dashboard
+  ansible.builtin.get_url:
+    url: https://grafana.com/api/dashboards/1860/revisions/{{ node_exporter_dashboard_revision }}/download
+    dest: "{{ stack_dir }}/monitoring/grafana/dashboards/node-exporter-full-r{{ node_exporter_dashboard_revision }}.json"
+    mode: "0644"
+  # --check sends a HEAD request, which grafana.com answers with 405.
+  when: not ansible_check_mode

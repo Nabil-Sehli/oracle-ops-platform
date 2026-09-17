@@ -1,0 +1,23 @@
+#!/bin/bash
+# Uploads the school's local backups (MySQL dumps + uploads archives written by
+# deploy/backup.sh) to Backblaze B2. Started by dlz-backup.service on success.
+# By hand: sudo systemctl start dlz-offsite
+set -euo pipefail
+. /etc/dlz-offsite/env
+
+# The whole directory, not just tonight's files: restic stores unchanged files
+# once, and a night that failed to upload is caught up the next night.
+# backup.sh names its files <db>_<date>_<time>.sql.gz, so sorting by name
+# sorts by age.
+latest_dump=$(printf '%s\n' "$BACKUP_DIR"/*.sql.gz | sort | tail -1)
+[ -f "$latest_dump" ] || { echo "no dump found in $BACKUP_DIR"; exit 1; }
+gzip -t "$latest_dump"
+
+dlz-restic backup --tag nightly "$BACKUP_DIR"
+
+# Longer than the 14 days kept on the server.
+dlz-restic forget --prune --tag nightly --keep-daily 14 --keep-weekly 8 --keep-monthly 12
+
+# Dead man's switch: Kuma alerts on Telegram when this ping stops arriving.
+curl -fsS -m 20 --retry 3 -o /dev/null "${KUMA_PUSH_URL}?status=up&msg=OK" \
+  || echo "warning: Kuma push failed"

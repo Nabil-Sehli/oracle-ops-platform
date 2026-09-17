@@ -1,0 +1,6 @@
+[Unit]
+Description=Telegram alert for failed %i
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/dlz-telegram "❌ %i failed on %H (language school). Check: sudo journalctl -u %i -n 50"

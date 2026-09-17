@@ -1,0 +1,38 @@
+# Off-site copies of the language school's nightly backups (PRODUCTION box).
+#   .\run.ps1 school.yml --check --diff    always first
+#   .\run.ps1 school.yml
+#
+# Only adds files next to the app. It does not touch the app, its repo checkout,
+# backup.sh or its timers: a systemd drop-in hooks onto dlz-backup.service, so
+# the upload starts after each successful local backup.
+- name: Push the school's backups off-site
+  hosts: school
+  become: true
+  vars_files:
+    - secrets.yml
+  vars:
+    base_domain: nabil-ops.duckdns.org
+    school_stack_dir: /home/ubuntu/dlz
+    school_backup_dir: "{{ school_stack_dir }}/deploy/backups"
+    backup_bucket: nabil-ops-backups-7k2x
+    backup_s3_endpoint: https://s3.eu-central-003.backblazeb2.com
+    restore_drill_time: "06:00"
+  pre_tasks:
+    # OnSuccess= in the drop-in needs systemd 249+.
+    - name: Check systemd version
+      ansible.builtin.command: systemctl --version
+      register: systemd_version
+      changed_when: false
+      check_mode: false
+
+    - name: Require systemd 249 or newer
+      ansible.builtin.assert:
+        that: (systemd_version.stdout_lines[0].split()[1] | int) >= 249
+
+    # No module reads a unit file; the systemd module would need a state change.
+    - name: Check that the local backup unit exists  # noqa command-instead-of-module
+      ansible.builtin.command: systemctl cat dlz-backup.service
+      changed_when: false
+      check_mode: false
+  roles:
+    - school_offsite

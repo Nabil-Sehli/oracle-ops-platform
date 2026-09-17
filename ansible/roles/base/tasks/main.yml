@@ -1,0 +1,57 @@
+- name: Upgrade installed packages
+  ansible.builtin.apt:
+    update_cache: true
+    cache_valid_time: 3600
+    upgrade: safe
+
+- name: Install base packages
+  ansible.builtin.apt:
+    name: [unattended-upgrades, python3-debian, python3-systemd, ca-certificates, curl, htop]
+    state: present
+
+- name: Enable daily unattended security upgrades
+  ansible.builtin.copy:
+    dest: /etc/apt/apt.conf.d/20auto-upgrades
+    mode: "0644"
+    content: |
+      APT::Periodic::Update-Package-Lists "1";
+      APT::Periodic::Unattended-Upgrade "1";
+      APT::Periodic::AutocleanInterval "7";
+
+# Kernel fixes only take effect after a reboot. Containers restart on their own.
+- name: Reboot automatically when an upgrade needs it
+  ansible.builtin.copy:
+    dest: /etc/apt/apt.conf.d/52unattended-upgrades-ops
+    mode: "0644"
+    content: |
+      Unattended-Upgrade::Automatic-Reboot "true";
+      Unattended-Upgrade::Automatic-Reboot-Time "{{ auto_reboot_time }}";
+      Unattended-Upgrade::Remove-Unused-Dependencies "true";
+
+- name: Create swap file
+  ansible.builtin.command: fallocate -l {{ swap_size_mb }}M /swapfile
+  args:
+    creates: /swapfile
+  register: base_swapfile
+
+- name: Restrict swap file permissions
+  ansible.builtin.file:
+    path: /swapfile
+    mode: "0600"
+
+- name: Format and enable swap
+  ansible.builtin.shell: mkswap /swapfile && swapon /swapfile
+  when: base_swapfile.changed
+  changed_when: true
+
+- name: Enable swap at boot
+  ansible.builtin.lineinfile:
+    path: /etc/fstab
+    line: /swapfile none swap sw 0 0
+
+- name: Only swap under real memory pressure
+  ansible.builtin.copy:
+    dest: /etc/sysctl.d/60-ops.conf
+    mode: "0644"
+    content: "vm.swappiness = 10\n"
+  notify: Reload sysctl

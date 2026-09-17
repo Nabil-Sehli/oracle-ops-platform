@@ -1,0 +1,9 @@
+apiVersion: 1
+providers:
+  - name: ops
+    folder: Ops
+    type: file
+    # Dashboards come from Ansible; UI edits would be lost on the next deploy.
+    allowUiUpdates: false
+    options:
+      path: /var/lib/grafana/dashboards

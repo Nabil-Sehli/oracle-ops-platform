@@ -1,0 +1,44 @@
+- name: Harden the ops server and run the service stack
+  hosts: ops
+  become: true
+  vars_files:
+    - secrets.yml
+  vars:
+    swap_size_mb: 2048
+    open_tcp_ports: [80, 443]
+    open_udp_ports: [443]   # HTTP/3
+    docker_only_tcp_ports: [9100]   # node_exporter
+    auto_reboot_time: "04:30"
+
+    base_domain: nabil-ops.duckdns.org
+    stack_dir: /opt/ops
+    timezone: Europe/Berlin
+    caddy_version: "2.11.4"
+    n8n_version: "2.39.6"
+    uptime_kuma_version: "2.5.5"
+    status_page_slug: ops
+
+    prometheus_version: "3.14.0"
+    alertmanager_version: "0.34.1"
+    node_exporter_version: "1.12.1"
+    cadvisor_version: "0.60.5"
+    grafana_version: "13.2.2"
+    node_exporter_dashboard_revision: 45
+    node_exporter_listen: "172.17.0.1:9100"   # docker0, not the public interface
+    # An alert fires when one of these is missing for 5 minutes.
+    monitored_containers: [caddy, n8n, uptime-kuma, grafana, alertmanager, node-exporter]
+
+    # Before the 04:30 upgrade reboot, so a reboot never interrupts a backup.
+    backup_time: "03:15"
+    restore_drill_time: "05:30"
+    backup_bucket: nabil-ops-backups-7k2x
+    backup_s3_endpoint: https://s3.eu-central-003.backblazeb2.com
+  roles:
+    - base
+    - ssh
+    - firewall
+    - fail2ban
+    - docker
+    - monitoring
+    - stack
+    - backup

@@ -1,0 +1,42 @@
+#!/bin/bash
+# Nightly off-site backup of the ops stack to Backblaze B2.
+# Run by ops-backup.timer. By hand: sudo systemctl start ops-backup
+set -euo pipefail
+. /etc/ops-backup/env
+
+VOL=/var/lib/docker/volumes
+STAGE=/var/backups/ops-sqlite
+
+# Copying a live SQLite file can catch it mid-write; .backup takes a consistent
+# copy while n8n and Kuma keep running. It has to run as root (/var/lib/docker
+# is closed to other users). If sqlite3 ever creates the -wal/-shm files, they
+# are handed back to the app's user, or the app could no longer open its DB.
+snapshot_db() {  # snapshot_db <live db> <copy>
+  mkdir -p "$(dirname "$2")"
+  sqlite3 -cmd ".timeout 30000" "$1" ".backup '$2'"
+  chown --reference="$1" "$1"-wal "$1"-shm 2>/dev/null || true
+}
+
+rm -rf "$STAGE"
+install -d -m 700 "$STAGE"
+trap 'rm -rf "$STAGE"' EXIT
+snapshot_db "$VOL/ops_n8n_data/_data/database.sqlite" "$STAGE/n8n/database.sqlite"
+snapshot_db "$VOL/ops_uptime_kuma_data/_data/kuma.db" "$STAGE/uptime-kuma/kuma.db"
+
+# /opt/ops holds n8n.env with N8N_ENCRYPTION_KEY; without it the restored
+# n8n credentials are unreadable.
+ops-restic backup --tag nightly \
+  --exclude "$VOL/ops_n8n_data/_data/database.sqlite*" \
+  --exclude "$VOL/ops_uptime_kuma_data/_data/kuma.db*" \
+  /opt/ops \
+  "$VOL/ops_n8n_data/_data" \
+  "$VOL/ops_uptime_kuma_data/_data" \
+  "$VOL/ops_caddy_data/_data" \
+  "$STAGE"
+
+ops-restic forget --prune --tag nightly --keep-daily 7 --keep-weekly 4 --keep-monthly 6
+
+# Dead man's switch: Kuma alerts on Telegram when this ping stops arriving.
+# A failed ping doesn't fail the backup; a missing one alerts anyway.
+curl -fsS -m 20 --retry 3 -o /dev/null "${KUMA_PUSH_URL}?status=up&msg=OK" \
+  || echo "warning: Kuma push failed"

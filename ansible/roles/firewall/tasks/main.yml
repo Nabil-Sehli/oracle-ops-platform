@@ -1,0 +1,33 @@
+# Oracle's Ubuntu image rejects everything except SSH in its own iptables rules,
+# on top of the VCN security list. Ports are added next to the SSH rule so the
+# Oracle InstanceServices rules (metadata, iSCSI) stay untouched.
+- name: Keep iptables-persistent installed
+  ansible.builtin.apt:
+    name: iptables-persistent
+    state: present
+
+- name: Open TCP ports
+  ansible.builtin.lineinfile:
+    path: /etc/iptables/rules.v4
+    line: -A INPUT -p tcp -m state --state NEW -m tcp --dport {{ item }} -j ACCEPT
+    insertafter: '^-A INPUT -p tcp -m state --state NEW -m tcp --dport 22 -j ACCEPT$'
+  loop: "{{ open_tcp_ports }}"
+  notify: Reload iptables
+
+# For services on the host network that only containers should reach
+# (node_exporter). 172.16.0.0/12 covers docker's bridge networks.
+- name: Open TCP ports to docker networks only
+  ansible.builtin.lineinfile:
+    path: /etc/iptables/rules.v4
+    line: -A INPUT -s 172.16.0.0/12 -p tcp -m state --state NEW -m tcp --dport {{ item }} -j ACCEPT
+    insertafter: '^-A INPUT -p tcp -m state --state NEW -m tcp --dport 22 -j ACCEPT$'
+  loop: "{{ docker_only_tcp_ports }}"
+  notify: Reload iptables
+
+- name: Open UDP ports
+  ansible.builtin.lineinfile:
+    path: /etc/iptables/rules.v4
+    line: -A INPUT -p udp -m udp --dport {{ item }} -j ACCEPT
+    insertafter: '^-A INPUT -p tcp -m state --state NEW -m tcp --dport 22 -j ACCEPT$'
+  loop: "{{ open_udp_ports }}"
+  notify: Reload iptables

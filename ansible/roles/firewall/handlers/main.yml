@@ -1,0 +1,12 @@
+# Not `netfilter-persistent reload`: on Ubuntu 24.04 it restores with --noflush,
+# so the rules get appended after the old REJECT and the new ports stay closed.
+# A plain restore replaces the filter table, which also wipes the chains Docker
+# and fail2ban add at runtime. Restarting them puts their rules back.
+- name: Reload iptables
+  ansible.builtin.shell: |
+    set -e
+    iptables-restore < /etc/iptables/rules.v4
+    for s in docker fail2ban; do
+      if systemctl is-active -q "$s"; then systemctl restart "$s"; fi
+    done
+  changed_when: true

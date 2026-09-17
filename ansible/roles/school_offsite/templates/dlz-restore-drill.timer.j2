@@ -1,0 +1,9 @@
+[Unit]
+Description=Monthly DLZ restore drill
+
+[Timer]
+OnCalendar=*-*-01 {{ restore_drill_time }}
+Persistent=true
+
+[Install]
+WantedBy=timers.target

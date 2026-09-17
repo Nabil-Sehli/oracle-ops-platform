@@ -1,0 +1,118 @@
+# Managed by Ansible. Only Caddy publishes ports; every other service is
+# reached through it on the internal "web" network.
+name: ops
+
+services:
+  caddy:
+    image: caddy:{{ caddy_version }}
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      # The directory, not the file: Ansible replaces files atomically, and a
+      # single-file bind mount would keep pointing at the old copy.
+      - ./caddy:/etc/caddy:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks: [web]
+
+  n8n:
+    image: n8nio/n8n:{{ n8n_version }}
+    restart: unless-stopped
+    env_file: n8n.env
+    volumes:
+      - n8n_data:/home/node/.n8n
+    networks: [web]
+
+  uptime-kuma:
+    image: louislam/uptime-kuma:{{ uptime_kuma_version }}
+    restart: unless-stopped
+    environment:
+      UPTIME_KUMA_DB_TYPE: sqlite
+      TZ: {{ timezone }}
+    volumes:
+      - uptime_kuma_data:/app/data
+    networks: [web]
+
+  # --- Monitoring (configs from the monitoring role) ---
+
+  prometheus:
+    image: prom/prometheus:v{{ prometheus_version }}
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=30d
+      - --storage.tsdb.retention.size=5GB
+    volumes:
+      - ./monitoring/prometheus:/etc/prometheus:ro
+      - prometheus_data:/prometheus
+    networks: [web]
+
+  alertmanager:
+    image: prom/alertmanager:v{{ alertmanager_version }}
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+      - --storage.path=/alertmanager
+    volumes:
+      - ./monitoring/alertmanager:/etc/alertmanager:ro
+      - alertmanager_data:/alertmanager
+    networks: [web]
+
+  # Host network so the NIC stats are the server's, not a container's. It
+  # listens only on the docker0 address; the firewall role lets docker networks in.
+  node-exporter:
+    image: prom/node-exporter:v{{ node_exporter_version }}
+    restart: unless-stopped
+    network_mode: host
+    pid: host
+    command:
+      - --path.rootfs=/host
+      - --web.listen-address={{ node_exporter_listen }}
+      - --collector.filesystem.mount-points-exclude=^/(dev|proc|run|sys|var/lib/docker/.+|var/lib/containerd/.+)($$|/)
+    volumes:
+      - /:/host:ro,rslave
+
+  cadvisor:
+    image: ghcr.io/google/cadvisor:v{{ cadvisor_version }}
+    restart: unless-stopped
+    privileged: true
+    devices:
+      - /dev/kmsg
+    command:
+      - --docker_only=true
+      - --housekeeping_interval=30s
+      - --store_container_labels=false
+      - --disable_metrics=advtcp,cpu_topology,cpuset,hugetlb,memory_numa,percpu,process,referenced_memory,resctrl,sched,tcp,udp
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker:/var/lib/docker:ro
+      - /dev/disk:/dev/disk:ro
+    networks: [web]
+
+  grafana:
+    image: grafana/grafana:{{ grafana_version }}
+    restart: unless-stopped
+    env_file: grafana.env
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    networks: [web]
+
+networks:
+  web:
+
+volumes:
+  caddy_data:
+  caddy_config:
+  n8n_data:
+  uptime_kuma_data:
+  prometheus_data:
+  alertmanager_data:
+  grafana_data:

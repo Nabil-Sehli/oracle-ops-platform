@@ -1,0 +1,4 @@
+# The apt-cache refresh and swap setup genuinely belong to the task that
+# changed, not to a handler at the end of the play.
+skip_list:
+  - no-handler

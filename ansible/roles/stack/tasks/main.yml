@@ -1,0 +1,37 @@
+- name: Create stack directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: "0755"
+  loop:
+    - "{{ stack_dir }}"
+    - "{{ stack_dir }}/caddy"
+
+- name: Write compose file
+  ansible.builtin.template:
+    src: compose.yml.j2
+    dest: "{{ stack_dir }}/compose.yml"
+    mode: "0644"
+
+- name: Write n8n environment
+  ansible.builtin.template:
+    src: n8n.env.j2
+    dest: "{{ stack_dir }}/n8n.env"
+    mode: "0600"
+  notify: Recreate n8n
+
+- name: Write Caddyfile
+  ansible.builtin.template:
+    src: Caddyfile.j2
+    dest: "{{ stack_dir }}/caddy/Caddyfile"
+    mode: "0644"
+    validate: docker run --rm -v %s:/tmp/Caddyfile:ro caddy:{{ caddy_version }} caddy validate --adapter caddyfile --config /tmp/Caddyfile
+  notify: Reload caddy
+
+# compose only touches containers whose definition changed, and says so.
+- name: Start the stack
+  ansible.builtin.command: docker compose up -d --remove-orphans
+  args:
+    chdir: "{{ stack_dir }}"
+  register: stack_compose_up
+  changed_when: stack_compose_up.stderr is search('Creat|Recreat|Start')

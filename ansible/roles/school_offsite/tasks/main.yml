@@ -1,0 +1,79 @@
+- name: Install restic
+  ansible.builtin.apt:
+    name: restic
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Create off-site config directory
+  ansible.builtin.file:
+    path: /etc/dlz-offsite
+    state: directory
+    mode: "0700"
+
+# Its own B2 key (limited to the school/ prefix) and its own restic password:
+# a compromised school server can't read or delete the ops backups.
+- name: Write off-site environment
+  ansible.builtin.template:
+    src: env.j2
+    dest: /etc/dlz-offsite/env
+    mode: "0600"
+  no_log: true
+
+- name: Install off-site scripts
+  ansible.builtin.copy:
+    src: "{{ item }}"
+    dest: /usr/local/sbin/{{ item }}
+    mode: "0755"
+  loop: [dlz-restic, dlz-telegram, dlz-offsite, dlz-restore-drill]
+
+- name: Install systemd units
+  ansible.builtin.copy:
+    src: "{{ item }}"
+    dest: /etc/systemd/system/{{ item }}
+    mode: "0644"
+  loop: [dlz-alert@.service, dlz-offsite.service, dlz-restore-drill.service]
+  notify: Reload systemd
+
+- name: Install restore drill timer
+  ansible.builtin.template:
+    src: dlz-restore-drill.timer.j2
+    dest: /etc/systemd/system/dlz-restore-drill.timer
+    mode: "0644"
+  notify: Reload systemd
+
+- name: Create drop-in directory for the existing backup unit
+  ansible.builtin.file:
+    path: /etc/systemd/system/dlz-backup.service.d
+    state: directory
+    mode: "0755"
+
+- name: Chain the upload onto the existing nightly backup
+  ansible.builtin.copy:
+    src: dlz-backup-offsite.conf
+    dest: /etc/systemd/system/dlz-backup.service.d/offsite.conf
+    mode: "0644"
+  notify: Reload systemd
+
+- name: Apply systemd changes
+  ansible.builtin.meta: flush_handlers
+
+- name: Check for an existing restic repository
+  ansible.builtin.command: /usr/local/sbin/dlz-restic cat config
+  register: school_offsite_restic_repo
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Initialize the restic repository
+  ansible.builtin.command: /usr/local/sbin/dlz-restic init
+  changed_when: true
+  when: school_offsite_restic_repo.rc != 0
+
+- name: Enable the restore drill timer
+  ansible.builtin.systemd_service:
+    name: dlz-restore-drill.timer
+    enabled: true
+    state: started
+  # In --check the unit file isn't written, so systemd doesn't know it yet.
+  when: not ansible_check_mode
