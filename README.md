@@ -51,7 +51,9 @@ scripts/kuma-setup.js       configures Uptime Kuma over its socket.io API, idemp
   consistent copy of their databases is taken; copying the live file could catch it mid-write.
 - **Backups prove themselves.** A monthly drill restores the newest snapshot, re-verifies a
   tenth of the stored data, runs an integrity check on the restored databases and reports to
-  Telegram. An untested backup is a guess.
+  Telegram. An untested backup is a guess. I also deleted n8n's data volume on purpose and
+  rebuilt it from B2: [the write-up](docs/incidents/2026-09-17-n8n-data-loss-drill.md) has the
+  timings and what it exposed.
 - **Two independent alert paths.** Alertmanager reports what's wrong; an Uptime Kuma push monitor
   reports *silence* — if a nightly backup never pings, that's an alert too.
 - **The webhooks pay for themselves.** n8n webhooks spend LLM quota and send mail, so Caddy
