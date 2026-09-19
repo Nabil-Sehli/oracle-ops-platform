@@ -72,8 +72,11 @@ tests/                      unit and HTTP tests for the collector (python -m uni
   not start this again" - and nothing noticed for 35 hours, because Prometheus is the thing that
   would have alerted. The containers too slow to finish stopping were restarted and looked fine.
   [The write-up](docs/incidents/2026-09-18-monitoring-silent-after-reboot.md) has the timeline.
-- **Two independent alert paths.** Alertmanager reports what's wrong; an Uptime Kuma push monitor
-  reports *silence* — if a nightly backup never pings, that's an alert too.
+- **Two independent alert paths, and one watches the other.** Alertmanager reports what's wrong;
+  an Uptime Kuma push monitor reports *silence* — if a nightly backup never pings, that's an alert
+  too. Kuma also checks Prometheus and Alertmanager themselves over the internal network, because
+  no alerting system can report its own absence. Drilled by stopping Prometheus: 89 seconds to
+  detect, 47 to clear.
 - **The webhooks pay for themselves.** n8n webhooks spend LLM quota and send mail, so Caddy
   rejects requests without a shared-secret header before n8n starts an execution.
 - **node_exporter binds to the Docker bridge only.** It needs the host network namespace for real

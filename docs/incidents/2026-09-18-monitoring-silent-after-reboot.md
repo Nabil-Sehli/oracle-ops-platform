@@ -58,17 +58,37 @@ asked to survive one, and would have failed again every night.
 restarts a container when the daemon starts regardless of how it stopped, which is the behaviour
 this stack always wanted. Applied 2026-09-19 16:04 UTC; all nine containers are now `always`.
 
-## What this leaves open
+## Detection
 
-`always` fixes the restart, but nothing yet *notices* if it fails again. The gap is structural: an
-alerting system can't be the thing that reports its own absence.
+`always` fixes the restart. It does not *notice* a recurrence, and that gap is structural: an
+alerting system cannot be the thing that reports its own absence.
 
-- **Next:** Uptime Kuma monitors against `prometheus:9090/-/healthy` and `alertmanager:9093/-/healthy`
-  over the internal network. Kuma is a separate process with a separate notification path, and it
-  survived this incident — it is the right watchdog.
-- **Also worth doing:** a reboot drill. The backups are proven by a monthly restore drill; the
-  stack's ability to come back from a reboot was assumed, and the assumption was wrong. `sudo reboot`
-  once a quarter, then check all nine containers.
+So Uptime Kuma now watches it. Kuma is a separate process with its own Telegram path, and it is the
+component that survived this incident — it is the right watchdog. Two monitors were added in
+`scripts/kuma-setup.js`, on the internal Docker network and off the public status page:
+
+| Monitor | Endpoint |
+|---|---|
+| Prometheus (internal) | `http://prometheus:9090/-/healthy` |
+| Alertmanager (internal) | `http://alertmanager:9093/-/healthy` |
+
+**Proven the same day** by stopping Prometheus on purpose:
+
+```
+16:27:36  prometheus stopped
+16:29:05  Kuma reports DOWN   (89 s to detect, Telegram sent)
+16:29:06  prometheus started
+16:29:53  Kuma reports UP     (47 s to recover)
+```
+
+Had these existed on 2026-09-18, the outage would have been 90 seconds of not knowing instead of
+35 hours.
+
+## Still open
+
+A reboot drill. The backups are proven by a monthly restore drill; the stack's ability to come back
+from a reboot was assumed, and the assumption was wrong. `sudo reboot` once a quarter, then check
+that all nine containers came back.
 
 ## Lesson
 

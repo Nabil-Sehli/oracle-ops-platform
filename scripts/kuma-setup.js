@@ -15,6 +15,17 @@ const MONITORS = [
     ["Portfolio", "https://nabil-sehli.github.io/portfolio/"],
     ["n8n automations", "https://n8n.nabil-ops.duckdns.org/healthz"],
 ];
+// Watchdogs for the alerting stack itself, reached on the internal docker
+// network and kept off the public status page. Prometheus cannot alert on its
+// own absence and Alertmanager is the path every alert takes, so on
+// 2026-09-18 both sat dead for 35 hours without a word. Kuma is a separate
+// process with its own Telegram notification, and it is what watches these.
+const INTERNAL_MONITORS = [
+    ["Prometheus (internal)", "http://prometheus:9090/-/healthy",
+        "Nothing else notices if Prometheus stops: every alert rule is evaluated inside it"],
+    ["Alertmanager (internal)", "http://alertmanager:9093/-/healthy",
+        "The path every Prometheus alert takes out of the box"],
+];
 const SLUG = "ops";
 const TITLE = "Nabil Sehli - Service Status";
 
@@ -24,6 +35,12 @@ const call = (event, ...args) => new Promise((resolve, reject) => {
     socket.emit(event, ...args, (res) => { clearTimeout(t); resolve(res); });
 });
 const must = (res, what) => { if (res && res.ok === false) throw new Error(what + ": " + res.msg); return res; };
+// Monitors added over the socket don't inherit the default notification the
+// way ones created in the UI do; they have to name it.
+const findTelegram = async () => {
+    for (let i = 0; notificationList === null && i < 50; i++) await new Promise((r) => setTimeout(r, 200));
+    return Object.values(notificationList || []).find((n) => n.name === "Telegram");
+};
 
 let monitorList = null;
 socket.on("monitorList", (list) => { monitorList = list; });
@@ -90,8 +107,7 @@ async function main() {
     for (const [name, token, description] of PUSH_MONITORS) {
         if (!token) continue;
         if (byName[name]) { console.log("exists:", name); continue; }
-        for (let i = 0; notificationList === null && i < 50; i++) await new Promise((r) => setTimeout(r, 200));
-        const tg = Object.values(notificationList || []).find((n) => n.name === "Telegram");
+        const tg = await findTelegram();
         const res = must(await call("add", {
             type: "push", name, pushToken: token,
             interval: 26 * 3600, retryInterval: 3600, resendInterval: 0, maxretries: 0,
@@ -99,6 +115,22 @@ async function main() {
             notificationIDList: tg ? { [tg.id]: true } : {},
             kafkaProducerBrokers: [], kafkaProducerSaslOptions: { mechanism: "None" },
             conditions: [], rabbitmqNodes: [], description,
+        }), "add " + name);
+        console.log("added:", name, res.monitorID, tg ? "with Telegram" : "WITHOUT Telegram");
+    }
+
+    for (const [name, url, description] of INTERNAL_MONITORS) {
+        if (byName[name]) { console.log("exists:", name); continue; }
+        const tg = await findTelegram();
+        const res = must(await call("add", {
+            type: "http", name, url, method: "GET",
+            interval: 60, retryInterval: 60, resendInterval: 0, maxretries: 2, timeout: 20,
+            // An internal name over plain HTTP: no certificate to expire.
+            expiryNotification: false, ignoreTls: false, upsideDown: false, maxredirects: 0,
+            accepted_statuscodes: ["200-299"],
+            notificationIDList: tg ? { [tg.id]: true } : {},
+            kafkaProducerBrokers: [], kafkaProducerSaslOptions: { mechanism: "None" },
+            conditions: [], rabbitmqNodes: [], httpBodyEncoding: "json", description,
         }), "add " + name);
         console.log("added:", name, res.monitorID, tg ? "with Telegram" : "WITHOUT Telegram");
     }
