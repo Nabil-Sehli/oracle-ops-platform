@@ -112,12 +112,13 @@ Two things they get right that are easy to get wrong:
 - The follow-up workflow runs attempt 2 an hour later *inside the same n8n execution*, so it puts
   the attempt number in `run_id`. Without that, the deduplication above would read the second
   attempt as a retry and silently drop a whole model call's tokens and cost.
-- **Branch order decides when telemetry fires.** A Wait node suspends the *whole* execution and
-  saves every sibling branch that hasn't run yet along with it. The telemetry branch hangs off the
-  same node as the branch leading into "Wait 1 Hour", and connected second it sat in the execution
-  stack for an hour before reporting. It is connected first now. Caught by watching a live run
-  stop at exactly that point - the node was in n8n's saved `nodeExecutionStack`, which looks
-  identical to "ran and returned nothing" unless you go looking.
+- **Node position decides when telemetry fires.** A Wait node suspends the *whole* execution and
+  saves every sibling branch that hasn't run yet along with it. The telemetry branch shares a
+  parent with the branch leading into "Wait 1 Hour", so sitting lower on the canvas it reported
+  an hour late. `executionOrder: v1` picks sibling branches by **position, top to bottom** - the
+  order of the connection array makes no difference, which cost a wrong fix before the right one.
+  Caught by watching a live run stop at exactly that point: the node was in n8n's saved
+  `nodeExecutionStack`, which looks identical to "ran and returned nothing" unless you go looking.
 
 A lead the model couldn't score is reported as `partial` rather than `failed`: the pipeline logged
 it, answered the caller and emailed a human. Only the model let go. Counting that as a pipeline
