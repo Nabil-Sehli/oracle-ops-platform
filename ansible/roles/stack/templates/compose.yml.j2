@@ -1,11 +1,19 @@
 # Managed by Ansible. Only Caddy publishes ports; every other service is
 # reached through it on the internal "web" network.
+#
+# restart: always, not unless-stopped. At the 04:30 upgrade reboot on
+# 2026-09-18, Prometheus and Alertmanager handled SIGTERM fast enough to
+# reach a clean stopped state before the box went down, and
+# `unless-stopped` then refuses to start a container that is stopped -
+# including one the daemon itself stopped. They stayed down for 36 hours,
+# silently, because Prometheus is the thing that would have alerted. The
+# slower containers were killed mid-stop, stayed "running" and came back.
 name: ops
 
 services:
   caddy:
     image: caddy:{{ caddy_version }}
-    restart: unless-stopped
+    restart: always
     ports:
       - "80:80"
       - "443:443"
@@ -20,15 +28,35 @@ services:
 
   n8n:
     image: n8nio/n8n:{{ n8n_version }}
-    restart: unless-stopped
+    restart: always
     env_file: n8n.env
     volumes:
       - n8n_data:/home/node/.n8n
     networks: [web]
 
+  # Failure forensics and cost/latency metrics for the n8n workflows. A stock
+  # python image with one bind-mounted file: no image to build on arm64, and
+  # nothing to patch but the tag. Only n8n posts to it, over the internal
+  # network; Caddy exposes the read-only pages, never the ingest path.
+  llmobs:
+    image: python:{{ python_version }}-alpine
+    restart: always
+    command: ["python", "-u", "/app/collector.py"]
+    env_file: llmobs.env
+    volumes:
+      - ./llmobs:/app:ro
+      - llmobs_data:/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:9109/healthz')"]
+      interval: 60s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    networks: [web]
+
   uptime-kuma:
     image: louislam/uptime-kuma:{{ uptime_kuma_version }}
-    restart: unless-stopped
+    restart: always
     environment:
       UPTIME_KUMA_DB_TYPE: sqlite
       TZ: {{ timezone }}
@@ -40,7 +68,7 @@ services:
 
   prometheus:
     image: prom/prometheus:v{{ prometheus_version }}
-    restart: unless-stopped
+    restart: always
     command:
       - --config.file=/etc/prometheus/prometheus.yml
       - --storage.tsdb.path=/prometheus
@@ -53,7 +81,7 @@ services:
 
   alertmanager:
     image: prom/alertmanager:v{{ alertmanager_version }}
-    restart: unless-stopped
+    restart: always
     command:
       - --config.file=/etc/alertmanager/alertmanager.yml
       - --storage.path=/alertmanager
@@ -66,7 +94,7 @@ services:
   # listens only on the docker0 address; the firewall role lets docker networks in.
   node-exporter:
     image: prom/node-exporter:v{{ node_exporter_version }}
-    restart: unless-stopped
+    restart: always
     network_mode: host
     pid: host
     command:
@@ -78,7 +106,7 @@ services:
 
   cadvisor:
     image: ghcr.io/google/cadvisor:v{{ cadvisor_version }}
-    restart: unless-stopped
+    restart: always
     privileged: true
     devices:
       - /dev/kmsg
@@ -97,7 +125,7 @@ services:
 
   grafana:
     image: grafana/grafana:{{ grafana_version }}
-    restart: unless-stopped
+    restart: always
     env_file: grafana.env
     volumes:
       - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
@@ -112,6 +140,7 @@ volumes:
   caddy_data:
   caddy_config:
   n8n_data:
+  llmobs_data:
   uptime_kuma_data:
   prometheus_data:
   alertmanager_data:

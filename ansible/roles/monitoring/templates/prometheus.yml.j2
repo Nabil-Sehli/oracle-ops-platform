@@ -33,3 +33,18 @@ scrape_configs:
       - targets: [cadvisor:8080]
         labels:
           instance: {{ inventory_hostname }}
+
+  # Per-run LLM cost, latency and failures, posted by the workflows themselves.
+  - job_name: llmobs
+    static_configs:
+      - targets: [llmobs:9109]
+        labels:
+          instance: {{ inventory_hostname }}
+
+  # n8n's own counters (executions started, succeeded, failed). They say a run
+  # failed; llmobs says which node failed and what it cost.
+  - job_name: n8n
+    static_configs:
+      - targets: [n8n:5678]
+        labels:
+          instance: {{ inventory_hostname }}

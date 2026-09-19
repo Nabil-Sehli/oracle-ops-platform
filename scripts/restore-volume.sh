@@ -15,8 +15,9 @@ VOLUME=${1:-}
 case "$VOLUME" in
   ops_n8n_data)         SERVICE=n8n;         DB=n8n/database.sqlite;      LIVE_DB=database.sqlite ;;
   ops_uptime_kuma_data) SERVICE=uptime-kuma; DB=uptime-kuma/kuma.db;      LIVE_DB=kuma.db ;;
+  ops_llmobs_data)      SERVICE=llmobs;      DB=llmobs/llmobs.db;         LIVE_DB=llmobs.db ;;
   ops_caddy_data)       SERVICE=caddy;       DB=;                         LIVE_DB= ;;
-  *) echo "usage: $0 ops_n8n_data|ops_uptime_kuma_data|ops_caddy_data" >&2; exit 2 ;;
+  *) echo "usage: $0 ops_n8n_data|ops_uptime_kuma_data|ops_llmobs_data|ops_caddy_data" >&2; exit 2 ;;
 esac
 
 STACK=/opt/ops
@@ -49,8 +50,11 @@ docker compose --project-directory "$STACK" up -d --no-start "$SERVICE"
 find "$VOLUME_PATH" -mindepth 1 -delete
 cp -a "$SOURCE/." "$VOLUME_PATH/"
 
-# Both images run as uid 1000 inside the container.
-[ "$VOLUME" = ops_caddy_data ] || chown -R 1000:1000 "$VOLUME_PATH"
+# n8n and Kuma run as uid 1000 inside their containers; Caddy and the
+# collector run as root.
+case "$VOLUME" in
+  ops_n8n_data|ops_uptime_kuma_data) chown -R 1000:1000 "$VOLUME_PATH" ;;
+esac
 
 echo "==> starting $SERVICE"
 docker compose --project-directory "$STACK" up -d "$SERVICE"

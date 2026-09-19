@@ -22,15 +22,21 @@ install -d -m 700 "$STAGE"
 trap 'rm -rf "$STAGE"' EXIT
 snapshot_db "$VOL/ops_n8n_data/_data/database.sqlite" "$STAGE/n8n/database.sqlite"
 snapshot_db "$VOL/ops_uptime_kuma_data/_data/kuma.db" "$STAGE/uptime-kuma/kuma.db"
+# Only present once the collector has started once.
+if [ -f "$VOL/ops_llmobs_data/_data/llmobs.db" ]; then
+  snapshot_db "$VOL/ops_llmobs_data/_data/llmobs.db" "$STAGE/llmobs/llmobs.db"
+fi
 
 # /opt/ops holds n8n.env with N8N_ENCRYPTION_KEY; without it the restored
 # n8n credentials are unreadable.
 ops-restic backup --tag nightly \
   --exclude "$VOL/ops_n8n_data/_data/database.sqlite*" \
   --exclude "$VOL/ops_uptime_kuma_data/_data/kuma.db*" \
+  --exclude "$VOL/ops_llmobs_data/_data/llmobs.db*" \
   /opt/ops \
   "$VOL/ops_n8n_data/_data" \
   "$VOL/ops_uptime_kuma_data/_data" \
+  "$VOL/ops_llmobs_data/_data" \
   "$VOL/ops_caddy_data/_data" \
   "$STAGE"
 

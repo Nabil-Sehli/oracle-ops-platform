@@ -48,6 +48,50 @@ groups:
           summary: "Container {{ name }} is not running"
 {% endfor %}
 
+  # The workflows report their own runs to llmobs. These alerts are about the
+  # pipeline being wrong, not about the box being unhealthy.
+  - name: llm
+    rules:
+      - alert: LlmRunsFailing
+        expr: |
+          sum by (workflow) (rate(llm_runs_total{status!="ok"}[15m]))
+            / sum by (workflow) (rate(llm_runs_total[15m])) > 0.2
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "{{ '{{' }} $value | humanizePercentage {{ '}}' }} of {{ '{{' }} $labels.workflow {{ '}}' }} runs are failing"
+
+      - alert: LlmProviderErrors
+        expr: increase(llm_provider_responses_total{code=~"429|5.."}[15m]) > 3
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "{{ '{{' }} $labels.model {{ '}}' }} answered {{ '{{' }} $labels.code {{ '}}' }} {{ '{{' }} $value {{ '}}' }} times in 15 minutes"
+
+      - alert: LlmRunsSlow
+        expr: |
+          histogram_quantile(0.95,
+            sum by (le, workflow) (rate(llm_run_duration_seconds_bucket[30m]))) > {{ llm_slow_run_seconds }}
+        for: 15m
+        labels: { severity: warning }
+        annotations:
+          summary: "95th percentile of {{ '{{' }} $labels.workflow {{ '}}' }} is {{ '{{' }} $value | humanizeDuration {{ '}}' }}"
+
+      - alert: LlmSpendOverBudget
+        expr: sum(increase(llm_cost_usd_total[24h])) > {{ llm_daily_budget_usd }}
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "LLM spend in the last 24h is ${{ '{{' }} $value | printf \"%.2f\" {{ '}}' }}, over the ${{ llm_daily_budget_usd }} budget"
+
+      # Without a price the cost panels read zero, which looks like "free"
+      # rather than "unknown". Add the model to llmobs_prices in site.yml.
+      - alert: LlmModelNotPriced
+        expr: increase(llmobs_unknown_model_total[6h]) > 0
+        labels: { severity: warning }
+        annotations:
+          summary: "No price for model {{ '{{' }} $labels.model {{ '}}' }}; its spend is missing from the totals"
+
   - name: monitoring
     rules:
       - alert: ScrapeTargetDown

@@ -15,6 +15,16 @@ for db in "$DB/n8n/database.sqlite" "$DB/uptime-kuma/kuma.db"; do
   result=$(sqlite3 "$db" "PRAGMA integrity_check")
   [ "$result" = ok ] || { echo "integrity check failed for $db: $result"; exit 1; }
 done
+# Snapshots taken before the collector existed simply have no file here,
+# and that must not fail a drill of an otherwise good backup.
+llmobs_db=$DB/llmobs/llmobs.db
+if [ -f "$llmobs_db" ]; then
+  result=$(sqlite3 "$llmobs_db" "PRAGMA integrity_check")
+  [ "$result" = ok ] || { echo "integrity check failed for $llmobs_db: $result"; exit 1; }
+  llmobs_line="llmobs: $(sqlite3 "$llmobs_db" "SELECT count(*) FROM runs") runs kept."
+else
+  llmobs_line="llmobs: no database in this snapshot."
+fi
 grep -q '^N8N_ENCRYPTION_KEY=.' "$DRILL/opt/ops/n8n.env" \
   || { echo "N8N_ENCRYPTION_KEY missing from restored n8n.env"; exit 1; }
 test -d "$DRILL/var/lib/docker/volumes/ops_caddy_data/_data/caddy" \
@@ -28,4 +38,5 @@ snapshot=$(ops-restic snapshots latest --tag nightly --json \
 ops-telegram "✅ Monthly restore drill passed on $(hostname)
 Snapshot $snapshot restored, 10% of repository data re-verified.
 n8n: $workflows workflows, Kuma: $monitors monitors, both databases intact.
-n8n encryption key and Caddy certificates present."
+n8n encryption key and Caddy certificates present.
+$llmobs_line"

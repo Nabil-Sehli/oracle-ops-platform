@@ -36,6 +36,18 @@ jobs:
         run: ansible-lint --nocolor site.yml school.yml
         working-directory: ansible
 
+  collector:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      # The collector imports nothing outside the standard library, which is
+      # the point: no requirements file, and the same interpreter as the image.
+      - name: Test the llmobs collector
+        run: python -m unittest discover -s tests -v
+
   shell:
     runs-on: ubuntu-latest
     steps:

@@ -1,0 +1,14 @@
+# Handlers run after the stack role, so the container exists by then.
+# The collector is bind-mounted, so a restart is enough to pick up new code.
+- name: Restart llmobs
+  ansible.builtin.command: docker compose restart llmobs
+  args:
+    chdir: "{{ stack_dir }}"
+  changed_when: true
+
+# Environment files are read only when a container is created.
+- name: Recreate llmobs
+  ansible.builtin.command: docker compose up -d --force-recreate llmobs
+  args:
+    chdir: "{{ stack_dir }}"
+  changed_when: true

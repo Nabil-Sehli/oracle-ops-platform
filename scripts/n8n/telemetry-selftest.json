@@ -1,0 +1,56 @@
+[
+  {
+    "id": "llmobsSelfTest1",
+    "name": "Telemetry self-test (temporary)",
+    "active": true,
+    "settings": {
+      "executionOrder": "v1",
+      "errorWorkflow": "llmobsTelemetry1"
+    },
+    "nodes": [
+      {
+        "parameters": {
+          "httpMethod": "POST",
+          "path": "telemetry-selftest",
+          "options": {}
+        },
+        "id": "aaaa0000-0001-4a10-9f01-selftest00001",
+        "name": "Self-test webhook",
+        "type": "n8n-nodes-base.webhook",
+        "typeVersion": 2.1,
+        "position": [
+          0,
+          0
+        ],
+        "webhookId": "aaaa0000-0001-4a10-9f01-selftest00001"
+      },
+      {
+        "parameters": {
+          "jsCode": "throw new Error('deliberate failure: telemetry self-test');"
+        },
+        "id": "aaaa0000-0002-4a10-9f01-selftest00002",
+        "name": "Break on purpose",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          220,
+          0
+        ]
+      }
+    ],
+    "connections": {
+      "Self-test webhook": {
+        "main": [
+          [
+            {
+              "node": "Break on purpose",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "pinData": {}
+  }
+]

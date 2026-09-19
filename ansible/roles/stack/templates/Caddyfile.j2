@@ -54,6 +54,19 @@ grafana.{{ base_domain }} {
 	}
 }
 
+# LLM run forensics, behind the same outer login as n8n. The ingest path is
+# deliberately not published: only n8n posts runs, from inside the docker
+# network, so there is no public write surface to guess a token against.
+llmobs.{{ base_domain }} {
+	encode zstd gzip
+	basic_auth {
+		{{ n8n_basic_auth_user }} {{ n8n_basic_auth_hash }}
+	}
+	@ingest path /v1/events /v1/events/*
+	respond @ingest 404
+	reverse_proxy llmobs:9109
+}
+
 # Uptime Kuma admin, behind the same outer login as n8n.
 kuma.{{ base_domain }} {
 	encode zstd gzip

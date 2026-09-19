@@ -10,3 +10,6 @@ ansible/secrets.yml
 
 # Personal working notes: server IPs, chat IDs, account details.
 HANDOFF.md
+
+__pycache__/
+*.pyc

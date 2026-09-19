@@ -1,0 +1,97 @@
+{
+  "name": "Telemetry: failed runs",
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "9a1f0c2e-0001-4a10-9f01-telemetry0001",
+      "name": "Any workflow failed",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        -220,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// n8n's error trigger already knows which node broke: err.node.name, or\n// lastNodeExecuted when the failure happened outside a node. That is exactly\n// the field the collector counts failures by, so pass it through unchanged.\nconst execution = $json.execution ?? {};\nconst workflow = $json.workflow ?? {};\nconst err = execution.error ?? {};\nconst node = err.node?.name ?? execution.lastNodeExecuted ?? null;\n\n// n8n reports HTTP codes as strings ('503'); the collector wants a number, and\n// uses it to classify the failure (429 rate limited, 503 overloaded, ...).\nconst httpStatus = Number(err.httpCode ?? err.status ?? NaN);\nconst message = [err.message, err.description]\n  .filter(Boolean)\n  .join(' - ')\n  .slice(0, 500);\n\nreturn {\n  json: {\n    // One id per execution, so a retried alert is not counted twice.\n    run_id: `n8n-${execution.id ?? Date.now()}`,\n    workflow: workflow.name ?? 'unknown',\n    status: 'failed',\n    started_at: Math.floor(Date.now() / 1000),\n    failed_node: node,\n    error: message,\n    steps: node\n      ? [{\n          node,\n          status: 'failed',\n          ...(Number.isFinite(httpStatus) ? { http_status: httpStatus } : {}),\n          error: message,\n        }]\n      : [],\n    attrs: {\n      execution_id: String(execution.id ?? ''),\n      execution_url: execution.url ?? '',\n      mode: execution.mode ?? '',\n      retry_of: String(execution.retryOf ?? ''),\n    },\n  },\n};\n"
+      },
+      "id": "9a1f0c2e-0002-4a10-9f01-telemetry0002",
+      "name": "Build telemetry event",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://llmobs:9109/v1/events",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "timeout": 5000,
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "9a1f0c2e-0003-4a10-9f01-telemetry0003",
+      "name": "POST run to llmobs",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        220,
+        0
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": null,
+          "name": "llmobs telemetry token"
+        }
+      },
+      "notes": "Header Auth credential: name X-Telemetry-Token, value llm_telemetry_token from secrets.yml. Telemetry must never turn one failed run into two, so the node continues on error."
+    }
+  ],
+  "connections": {
+    "Any workflow failed": {
+      "main": [
+        [
+          {
+            "node": "Build telemetry event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build telemetry event": {
+      "main": [
+        [
+          {
+            "node": "POST run to llmobs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "id": "llmobsTelemetry1"
+}

@@ -1,0 +1,33 @@
+# Config for the llmobs collector, which lives in the stack role's compose
+# file. Runs before the stack role, so the files exist when compose starts it.
+- name: Create the collector directory
+  ansible.builtin.file:
+    path: "{{ stack_dir }}/llmobs"
+    state: directory
+    mode: "0755"
+
+# Both land in /app inside the container: collector.py is the service, smoke.py
+# is the end-to-end check that is run there by hand after a deploy.
+- name: Install the collector and its smoke test
+  ansible.builtin.copy:
+    src: "{{ item }}"
+    dest: "{{ stack_dir }}/llmobs/{{ item }}"
+    mode: "0644"
+  loop: [collector.py, smoke.py]
+  notify: Restart llmobs
+
+# Holds the ingest token, so it is not world-readable like compose.yml.
+- name: Write the collector environment
+  ansible.builtin.template:
+    src: llmobs.env.j2
+    dest: "{{ stack_dir }}/llmobs.env"
+    mode: "0600"
+  notify: Recreate llmobs
+
+# The monitoring role created this directory; Grafana provisioning picks the
+# file up on its own. It is a template only for the link to the forensics UI.
+- name: Install the LLM dashboard
+  ansible.builtin.template:
+    src: llm-dashboard.json.j2
+    dest: "{{ stack_dir }}/monitoring/grafana/dashboards/llm.json"
+    mode: "0644"

@@ -50,6 +50,20 @@ I host, backs up off the box with proven restores, and publishes a public status
 ### 6. Portfolio section
 - Architecture diagram, link to the live status page, the incident report, rebuild and restore times.
 
+### 7. LLM observability (2026-09-19) - done, live
+- A failure forensics tool for the n8n workflows: every run becomes a trace that names the
+  exact node that failed, with the model, tokens, cost and latency of each step.
+- `llmobs`, a standard-library Python collector on the existing stack: SQLite for the traces,
+  `/metrics` for the Prometheus that is already here, a plain HTML page for reading a broken run.
+- Grafana dashboard (failure rate, p95 latency, spend, failures by node) and Telegram alerts on
+  failure rate, provider 429/5xx, slow runs, daily spend over budget, and an unpriced model.
+- An n8n error-trigger workflow reports every failed run without touching the workflows.
+- Found on the way: the monitoring stack had been dead since the previous night's reboot
+  (`restart: unless-stopped`); fixed to `always` and written up in `docs/incidents/`.
+- Next: an Uptime Kuma watchdog on Prometheus itself, and the same event on successful runs,
+  from inside the two solar workflows, for token
+  and cost coverage on the happy path.
+
 ## Needs me at the computer
 
 - [ ] OCI console: confirm remaining free A1 allowance (Governance → Limits, Quotas and Usage → Compute, "Ampere A1")

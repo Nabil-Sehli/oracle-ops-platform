@@ -14,6 +14,7 @@
     stack_dir: /opt/ops
     timezone: Europe/Berlin
     caddy_version: "2.11.4"
+    python_version: "3.13"   # base image for the llmobs collector
     n8n_version: "2.39.6"
     uptime_kuma_version: "2.5.5"
     status_page_slug: ops
@@ -26,7 +27,20 @@
     node_exporter_dashboard_revision: 45
     node_exporter_listen: "172.17.0.1:9100"   # docker0, not the public interface
     # An alert fires when one of these is missing for 5 minutes.
-    monitored_containers: [caddy, n8n, uptime-kuma, grafana, alertmanager, node-exporter]
+    monitored_containers: [caddy, n8n, llmobs, uptime-kuma, grafana, alertmanager, node-exporter]
+
+    # LLM observability. Runs and steps are kept for forensics; the counters
+    # behind the Grafana panels are kept forever.
+    llmobs_retention_days: 14
+    llmobs_max_series: 500
+    # USD per million tokens, from each provider's pricing page.
+    llmobs_prices:
+      gemini-3.5-flash-lite: { in: 0.10, out: 0.40 }
+      gemini-3.5-flash: { in: 0.30, out: 2.50 }
+      claude-haiku-4-5: { in: 1.00, out: 5.00 }
+      claude-sonnet-5: { in: 3.00, out: 15.00 }
+    llm_daily_budget_usd: 1.00
+    llm_slow_run_seconds: 30
 
     # Before the 04:30 upgrade reboot, so a reboot never interrupts a backup.
     backup_time: "03:15"
@@ -40,5 +54,6 @@
     - fail2ban
     - docker
     - monitoring
+    - llmobs
     - stack
     - backup
