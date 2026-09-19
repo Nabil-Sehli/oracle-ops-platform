@@ -97,9 +97,31 @@ this n8n reports itself. It needs one credential — Header Auth named `llmobs t
 header `X-Telemetry-Token`, value `llm_telemetry_token` from `secrets.yml` — and its HTTP node is
 set to continue on error, because telemetry must never turn one failed run into two.
 
-**Successes** need a node inside the workflow, after the response is sent, reading token counts
-off the provider's response (`usageMetadata` for Gemini, `usage` for Anthropic). That change
-belongs to the workflow repository, not here.
+**Successes** need a node inside the workflow, and both solar workflows now have one: a Code node
+that builds the event and an HTTP node that posts it, hanging off the branch that runs *after* the
+caller has been answered and the row written. They live in the
+[workflow repository](https://github.com/Nabil-Sehli/n8n-solar-callcenter-automations) and stay off
+until `telemetry_url` is set in **Config & Prompt**, so importing those workflows without a
+collector changes nothing.
+
+Two things they get right that are easy to get wrong:
+
+- Gemini reports thinking tokens separately but bills them as output; Anthropic already folds them
+  into `output_tokens`. Both are normalized, so a provider switch doesn't change what "output
+  tokens" means halfway through a cost chart.
+- The follow-up workflow runs attempt 2 an hour later *inside the same n8n execution*, so it puts
+  the attempt number in `run_id`. Without that, the deduplication above would read the second
+  attempt as a retry and silently drop a whole model call's tokens and cost.
+- **Branch order decides when telemetry fires.** A Wait node suspends the *whole* execution and
+  saves every sibling branch that hasn't run yet along with it. The telemetry branch hangs off the
+  same node as the branch leading into "Wait 1 Hour", and connected second it sat in the execution
+  stack for an hour before reporting. It is connected first now. Caught by watching a live run
+  stop at exactly that point - the node was in n8n's saved `nodeExecutionStack`, which looks
+  identical to "ran and returned nothing" unless you go looking.
+
+A lead the model couldn't score is reported as `partial` rather than `failed`: the pipeline logged
+it, answered the caller and emailed a human. Only the model let go. Counting that as a pipeline
+failure would hide real breakage behind API weather.
 
 ## Alerts
 

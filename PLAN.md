@@ -60,9 +60,10 @@ I host, backs up off the box with proven restores, and publishes a public status
 - An n8n error-trigger workflow reports every failed run without touching the workflows.
 - Found on the way: the monitoring stack had been dead since the previous night's reboot
   (`restart: unless-stopped`); fixed to `always` and written up in `docs/incidents/`.
-- Next: an Uptime Kuma watchdog on Prometheus itself, and the same event on successful runs,
-  from inside the two solar workflows, for token
-  and cost coverage on the happy path.
+- Uptime Kuma now watches Prometheus and Alertmanager themselves, drilled by stopping Prometheus
+  (89 s to detect). A reboot drill followed: nine containers back unattended in 1m41s.
+- The two solar workflows report successful runs too, so tokens and cost are covered on the happy
+  path, not just failures.
 
 ## Needs me at the computer
 
