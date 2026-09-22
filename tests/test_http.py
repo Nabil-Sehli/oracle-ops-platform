@@ -26,8 +26,10 @@ EVENT = {
 }
 
 
-def call(url, data=None, token=None):
+def call(url, data=None, token=None, agent=None):
     request = urllib.request.Request(url, method="POST" if data is not None else "GET")
+    if agent:
+        request.add_header("User-Agent", agent)
     if data is not None:
         request.add_header("Content-Type", "application/json")
         request.data = json.dumps(data).encode()
@@ -85,6 +87,15 @@ class HttpTest(unittest.TestCase):
         code, body = call(self.base + "/runs/exec-http-1")
         self.assertEqual(code, 200)
         self.assertIn("Gemini: Score Lead", body)
+
+    def test_only_a_prometheus_scrape_releases_a_new_series(self):
+        event = dict(EVENT, run_id="exec-http-new", workflow="fresh-workflow")
+        self.assertEqual(call(self.base + "/v1/events", event, token="test-token")[0], 202)
+        key = 'llm_runs_total{status="failed",workflow="fresh-workflow"} '
+        self.assertIn(key + "1", call(self.base + "/metrics")[1])
+        prometheus = "Prometheus/3.5.0"
+        self.assertIn(key + "0", call(self.base + "/metrics", agent=prometheus)[1])
+        self.assertIn(key + "1", call(self.base + "/metrics", agent=prometheus)[1])
 
     def test_batch_of_events(self):
         code, body = call(self.base + "/v1/events", {"events": [

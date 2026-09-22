@@ -18,6 +18,7 @@ import hmac
 import html
 import json
 import os
+import re
 import signal
 import sqlite3
 import threading
@@ -94,10 +95,13 @@ CREATE TABLE IF NOT EXISTS steps (
   PRIMARY KEY (run_id, seq)
 );
 
+-- pending: counted but not yet shown to Prometheus (see bump).
 CREATE TABLE IF NOT EXISTS counters (
-  name   TEXT NOT NULL,
-  labels TEXT NOT NULL,
-  value  REAL NOT NULL,
+  name    TEXT NOT NULL,
+  labels  TEXT NOT NULL,
+  value   REAL NOT NULL,
+  pending REAL NOT NULL DEFAULT 0,
+  shown   INTEGER NOT NULL DEFAULT 1,
   PRIMARY KEY (name, labels)
 );
 """
@@ -114,6 +118,10 @@ def db():
         _db.execute("PRAGMA journal_mode=WAL")
         _db.execute("PRAGMA synchronous=NORMAL")
         _db.executescript(SCHEMA)
+        columns = {row["name"] for row in _db.execute("PRAGMA table_info(counters)")}
+        if "pending" not in columns:  # databases created before these columns
+            _db.execute("ALTER TABLE counters ADD COLUMN pending REAL NOT NULL DEFAULT 0")
+            _db.execute("ALTER TABLE counters ADD COLUMN shown INTEGER NOT NULL DEFAULT 1")
         _db.commit()
     return _db
 
@@ -126,10 +134,17 @@ def _label_key(labels):
 
 
 def bump(conn, name, labels, value=1.0):
-    """Add to a counter, collapsing new label sets once the cap is reached."""
+    """Add to a counter, collapsing new label sets once the cap is reached.
+
+    A new series is shown to Prometheus at 0 first and gets its value on the
+    scrape after. increase() and rate() only count growth between two samples,
+    so a series whose first sample is already 1 counts as 0 - on these
+    low-volume counters that hid the first failure of every kind, the first run
+    of every status and the first spend on every model.
+    """
     key = _label_key(labels)
     row = conn.execute(
-        "SELECT value FROM counters WHERE name = ? AND labels = ?", (name, key)
+        "SELECT shown FROM counters WHERE name = ? AND labels = ?", (name, key)
     ).fetchone()
     if row is None:
         seen = conn.execute(
@@ -137,17 +152,25 @@ def bump(conn, name, labels, value=1.0):
         ).fetchone()["n"]
         if seen >= MAX_SERIES:
             key = _label_key({k: "other" for k in labels})
-            collapsed = _label_key({"metric": name})
-            conn.execute(
-                "INSERT INTO counters (name, labels, value) VALUES (?, ?, 1)"
-                " ON CONFLICT (name, labels) DO UPDATE SET value = value + 1",
-                ("llmobs_series_collapsed_total", collapsed),
-            )
-    conn.execute(
-        "INSERT INTO counters (name, labels, value) VALUES (?, ?, ?)"
-        " ON CONFLICT (name, labels) DO UPDATE SET value = value + excluded.value",
-        (name, key, value),
-    )
+            bump(conn, "llmobs_series_collapsed_total", {"metric": name})
+            row = conn.execute(
+                "SELECT shown FROM counters WHERE name = ? AND labels = ?", (name, key)
+            ).fetchone()
+    if row is None:
+        conn.execute(
+            "INSERT INTO counters (name, labels, value, pending, shown) VALUES (?, ?, 0, ?, 0)",
+            (name, key, value),
+        )
+    elif row["shown"]:
+        conn.execute(
+            "UPDATE counters SET value = value + ? WHERE name = ? AND labels = ?",
+            (value, name, key),
+        )
+    else:
+        conn.execute(
+            "UPDATE counters SET pending = pending + ? WHERE name = ? AND labels = ?",
+            (value, name, key),
+        )
 
 
 def observe(conn, name, labels, seconds):
@@ -189,12 +212,26 @@ def _bucket_order(item):
     return (rest, float("inf") if le == "+Inf" else float(le))
 
 
-def render_metrics():
-    """Build the exposition text from the counter table plus live gauges."""
+def render_metrics(scrape=False):
+    """Build the exposition text from the counter table plus live gauges.
+
+    A Prometheus scrape sees new series at 0 and releases them for the next
+    one (see bump). Anyone else - a person with curl, the tests - sees the
+    true totals and releases nothing, so they can't steal the 0 sample.
+    """
     conn = db()
     with _lock:
-        rows = conn.execute("SELECT name, labels, value FROM counters").fetchall()
+        shown = "value" if scrape else "value + pending"
+        rows = conn.execute(
+            "SELECT name, labels, {0} AS value FROM counters".format(shown)
+        ).fetchall()
         gauges = _gauges(conn)
+        if scrape:
+            with conn:
+                conn.execute(
+                    "UPDATE counters SET value = value + pending, pending = 0, shown = 1"
+                    " WHERE shown = 0"
+                )
 
     stored = {}
     for row in rows:
@@ -255,6 +292,10 @@ def clean(value, limit=120):
 
 def classify(http_status, message):
     """Best-effort error type when the workflow did not send one."""
+    # n8n's HTTP node puts the status only in the message: "API error (503 - ...".
+    code = re.search(r"\b(4\d\d|5\d\d)\b", message or "") if not http_status else None
+    if code:
+        http_status = int(code.group(1))
     if http_status:
         if http_status == 429:
             return "rate_limited"
@@ -274,6 +315,7 @@ def classify(http_status, message):
         ("enotfound", "unreachable"),
         ("quota", "rate_limited"),
         ("overload", "provider_overloaded"),
+        ("high demand", "provider_overloaded"),
         ("json", "bad_model_output"),
         ("parse", "bad_model_output"),
     ):
@@ -669,7 +711,8 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/healthz":
                 return self._send(200, "ok\n", "text/plain; charset=utf-8")
             if path == "/metrics":
-                return self._send(200, render_metrics(),
+                scrape = self.headers.get("User-Agent", "").startswith("Prometheus/")
+                return self._send(200, render_metrics(scrape),
                                   "text/plain; version=0.0.4; charset=utf-8")
             if path == "/":
                 return self._html(200, index_html(query))

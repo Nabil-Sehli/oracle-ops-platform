@@ -154,6 +154,15 @@ class CollectorTest(unittest.TestCase):
         self.assertEqual(self.c.classify(None, "Unexpected token in JSON"), "bad_model_output")
         self.assertEqual(self.c.classify(None, "something else"), "unknown")
 
+    def test_classify_finds_the_status_inside_n8n_error_text(self):
+        # Run n8n-25: the HTTP node reports the code only in its message.
+        message = ('Auto-scoring failed: API error (503 - "{ "error": { "code": 503, '
+                   '"message": "This model is currently experiencing high demand.')
+        self.assertEqual(self.c.classify(None, message), "provider_overloaded")
+        self.assertEqual(self.c.classify(None, "API error (429 - quota)"), "rate_limited")
+        self.assertEqual(self.c.classify(None, "high demand, try later"), "provider_overloaded")
+        self.assertEqual(self.c.classify(None, "timeout of 120000ms exceeded"), "timeout")
+
     def test_failure_counter_carries_the_node(self):
         self.run_event(run_id="exec-4", status="failed", steps=[
             {"node": "Gemini: Score Lead", "status": "failed", "http_status": 503},
@@ -226,6 +235,46 @@ class CollectorTest(unittest.TestCase):
         self.assertIn("llmobs_runs_stored 0", text)
         self.assertNotIn("llm_runs_total{", text)
 
+    # --- first sample of a new series ---
+
+    def test_prometheus_sees_a_new_series_at_zero_first(self):
+        # increase() only counts growth between samples: a series born at 1
+        # would never count its first event.
+        self.run_event(run_id="exec-7", status="partial", steps=[])
+        key = 'llm_runs_total{status="partial",workflow="ai-lead-qualification"}'
+        self.assertEqual(series(self.c.render_metrics(scrape=True), "llm_runs_total")[key], 0)
+        self.assertEqual(series(self.c.render_metrics(scrape=True), "llm_runs_total")[key], 1)
+
+    def test_events_before_the_first_scrape_all_arrive_on_the_second(self):
+        self.run_event(run_id="a", status="partial", steps=[])
+        self.run_event(run_id="b", status="partial", steps=[])
+        self.c.render_metrics(scrape=True)
+        self.run_event(run_id="c", status="partial", steps=[])
+        counts = series(self.c.render_metrics(scrape=True), "llm_runs_total")
+        self.assertEqual(sum(counts.values()), 3)
+
+    def test_a_known_series_grows_at_once(self):
+        self.run_event(run_id="a", steps=[])
+        self.c.render_metrics(scrape=True)
+        self.c.render_metrics(scrape=True)
+        self.run_event(run_id="b", steps=[])
+        counts = series(self.c.render_metrics(scrape=True), "llm_runs_total")
+        self.assertEqual(sum(counts.values()), 2)
+
+    def test_reading_by_hand_shows_totals_and_releases_nothing(self):
+        self.run_event(run_id="a", status="partial", steps=[])
+        self.assertEqual(sum(series(self.c.render_metrics(), "llm_runs_total").values()), 1)
+        self.assertEqual(
+            sum(series(self.c.render_metrics(scrape=True), "llm_runs_total").values()), 0)
+
+    def test_new_histogram_series_stay_cumulative(self):
+        self.run_event(run_id="a", steps=[])
+        self.c.render_metrics(scrape=True)
+        self.run_event(run_id="b", duration_ms=400, steps=[])  # opens the 0.5s bucket
+        buckets = series(self.c.render_metrics(scrape=True), "llm_run_duration_seconds_bucket")
+        ordered = [value for key, value in buckets.items()]
+        self.assertEqual(ordered, sorted(ordered))
+
     # --- retention ---
 
     def test_prune_drops_old_runs_but_keeps_counters(self):
@@ -270,6 +319,26 @@ class CollectorTest(unittest.TestCase):
         self.assertIn("Score", page)
         self.assertIn("&lt;script&gt;", page)
         self.assertNotIn("<script>", page)
+
+
+class UpgradeTest(unittest.TestCase):
+    def test_a_database_from_before_pending_keeps_its_counters(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        path = os.path.join(directory.name, "t.db")
+        import sqlite3
+        old = sqlite3.connect(path)
+        old.execute("CREATE TABLE counters (name TEXT NOT NULL, labels TEXT NOT NULL,"
+                    " value REAL NOT NULL, PRIMARY KEY (name, labels))")
+        old.execute("INSERT INTO counters VALUES ('llm_runs_total',"
+                    " '{\"status\":\"ok\",\"workflow\":\"w\"}', 4)")
+        old.commit()
+        old.close()
+        c = load_collector(path)
+        self.addCleanup(close, c)
+        c.ingest({"run_id": "r", "workflow": "w", "status": "ok"})
+        counts = series(c.render_metrics(scrape=True), "llm_runs_total")
+        self.assertEqual(counts['llm_runs_total{status="ok",workflow="w"}'], 5)
 
 
 class CardinalityTest(unittest.TestCase):

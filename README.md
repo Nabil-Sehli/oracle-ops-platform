@@ -108,5 +108,6 @@ Copy-Item secrets.example.yml secrets.yml              # passwords, tokens, keys
 
 CI runs on every push: `terraform fmt -check` and `terraform validate`, `ansible-lint` at its
 `production` profile, `shellcheck` over the backup scripts, and the collector's own test suite
-(30 tests: ingest validation, deduplication, cost arithmetic, Prometheus exposition format,
-retention, and the HTTP surface including the ingest token).
+(38 tests: ingest validation, deduplication, cost arithmetic, Prometheus exposition format,
+new series starting at 0 so `increase()` counts their first event, retention, and the HTTP
+surface including the ingest token).
