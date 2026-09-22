@@ -51,6 +51,7 @@
     - base
     - ssh
     - firewall
+    - tailscale
     - fail2ban
     - docker
     - monitoring

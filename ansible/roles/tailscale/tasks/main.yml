@@ -1,0 +1,66 @@
+# Joins the server to the tailnet, so SSH no longer depends on the laptop's
+# public IP (it changes with every cafe). sshd itself is unchanged: same key,
+# same hardening, reached on the server's 100.x address instead.
+- name: Add Tailscale apt repository
+  ansible.builtin.deb822_repository:
+    name: tailscale
+    types: deb
+    uris: https://pkgs.tailscale.com/stable/ubuntu
+    suites: "{{ ansible_distribution_release }}"
+    components: main
+    architectures: "{{ 'arm64' if ansible_architecture == 'aarch64' else 'amd64' }}"
+    signed_by: "https://pkgs.tailscale.com/stable/ubuntu/{{ ansible_distribution_release }}.noarmor.gpg"
+  register: tailscale_repo
+
+- name: Refresh apt cache for the new repository
+  ansible.builtin.apt:
+    update_cache: true
+  when: tailscale_repo.changed
+
+- name: Install Tailscale
+  ansible.builtin.apt:
+    name: tailscale
+    state: present
+
+- name: Start tailscaled
+  ansible.builtin.service:
+    name: tailscaled
+    state: started
+    enabled: true
+
+# Tailscale's own iptables chain is wiped whenever rules.v4 is restored (see the
+# firewall handler), so the tailnet gets a rule in the file that survives it.
+# The handler does not restart tailscaled to put that chain back: the playbook
+# itself runs over the tailnet, and the restart would cut it off mid-run.
+- name: Accept traffic from the tailnet
+  ansible.builtin.lineinfile:
+    path: /etc/iptables/rules.v4
+    line: -A INPUT -i tailscale0 -j ACCEPT
+    insertafter: '^-A INPUT -p tcp -m state --state NEW -m tcp --dport 22 -j ACCEPT$'
+  notify: Reload iptables
+
+- name: Check whether the server is already on the tailnet
+  ansible.builtin.command: tailscale status --json
+  register: tailscale_status
+  changed_when: false
+  failed_when: false
+
+# The auth key is single-use: once joined, the node's own key keeps it logged
+# in, so this runs on the first deploy only.
+- name: Join the tailnet
+  ansible.builtin.command:
+    argv: [tailscale, up, "--auth-key={{ tailscale_authkey }}", --hostname=ops-server]
+  when: >-
+    tailscale_status.rc != 0 or
+    (tailscale_status.stdout | from_json).BackendState != 'Running'
+  no_log: true
+  changed_when: true
+
+- name: Read the tailnet address
+  ansible.builtin.command: tailscale ip -4
+  register: tailscale_ip
+  changed_when: false
+
+- name: Show the tailnet address
+  ansible.builtin.debug:
+    msg: "ops-server is on the tailnet at {{ tailscale_ip.stdout }}"

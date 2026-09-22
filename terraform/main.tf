@@ -56,14 +56,18 @@ resource "oci_core_security_list" "public" {
     protocol    = "all"
   }
 
-  // SSH, restricted to one address. Everything else on this box is reached
-  // through Caddy on 80/443, so nothing else needs to be open.
-  ingress_security_rules {
-    source   = var.my_ip_cidr
-    protocol = "6" // TCP
-    tcp_options {
-      min = 22
-      max = 22
+  // SSH goes over Tailscale, so port 22 is closed to the internet by default.
+  // ssh_allowed_cidrs opens it for bootstrapping a new server or as a break-glass
+  // if the tailnet is down. Everything else is reached through Caddy on 80/443.
+  dynamic "ingress_security_rules" {
+    for_each = var.ssh_allowed_cidrs
+    content {
+      source   = ingress_security_rules.value
+      protocol = "6" // TCP
+      tcp_options {
+        min = 22
+        max = 22
+      }
     }
   }
 

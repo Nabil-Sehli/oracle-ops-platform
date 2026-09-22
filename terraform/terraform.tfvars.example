@@ -13,5 +13,6 @@ compartment_ocid = "ocid1.tenancy.oc1..REPLACE"
 // ssh-keygen -t ed25519 -C "ops-platform" -f ~/.ssh/ops_platform
 ssh_public_key = "ssh-ed25519 AAAA... ops-platform"
 
-// curl -s https://api.ipify.org  -> append /32
-my_ip_cidr = "1.2.3.4/32"
+// SSH is reached over Tailscale; port 22 stays closed. To bootstrap a new
+// server (or if the tailnet is down): curl -s https://api.ipify.org -> /32
+// ssh_allowed_cidrs = ["1.2.3.4/32"]

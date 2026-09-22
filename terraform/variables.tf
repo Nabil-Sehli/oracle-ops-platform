@@ -49,7 +49,8 @@ variable "name_prefix" {
   default = "ops"
 }
 
-variable "my_ip_cidr" {
-  type        = string
-  description = "Your own address for SSH, as a /32 (e.g. 41.250.10.5/32). Use 0.0.0.0/0 only if your IP changes constantly."
+variable "ssh_allowed_cidrs" {
+  type        = list(string)
+  default     = []
+  description = "Addresses allowed to reach port 22 from the internet. Empty: SSH only over Tailscale. Set to [\"<your ip>/32\"] to bootstrap a new server or if the tailnet is down."
 }

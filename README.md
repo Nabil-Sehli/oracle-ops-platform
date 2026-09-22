@@ -28,11 +28,12 @@ Uptime Kuma, Grafana) sit behind a login.
 ```
 terraform/                  VCN, subnet, security list, Ampere A1 instance
 ansible/
-  site.yml                  the ops server: base, ssh, firewall, fail2ban, docker, monitoring, llmobs, stack, backup
+  site.yml                  the ops server: base, ssh, firewall, tailscale, fail2ban, docker, monitoring, llmobs, stack, backup
   school.yml                off-site backups for a second, pre-existing production server
   run.ps1                   runs ansible-playbook in a container (no Ansible on Windows)
   roles/
     base ssh firewall fail2ban   hardening: unattended upgrades, key-only SSH, iptables, ban repeat offenders
+    tailscale                    joins the tailnet; SSH goes over it and port 22 is closed to the internet
     docker                       engine, log rotation
     monitoring                   Prometheus, Alertmanager, Grafana configs and dashboards
     llmobs                       LLM run collector: forensics UI, metrics, cost, Grafana dashboard
@@ -90,12 +91,14 @@ tests/                      unit and HTTP tests for the collector (python -m uni
 ```powershell
 # once
 cd terraform
-Copy-Item terraform.tfvars.example terraform.tfvars   # tenancy OCIDs, region, your IP, SSH key
-terraform init; terraform apply
+Copy-Item terraform.tfvars.example terraform.tfvars   # tenancy OCIDs, region, SSH key,
+terraform init; terraform apply                       #   ssh_allowed_cidrs = your IP for now
 
 cd ..\ansible
-Copy-Item inventory.ini.example inventory.ini          # the instance's public IP
-Copy-Item secrets.example.yml secrets.yml              # passwords, tokens, keys
+Copy-Item inventory.ini.example inventory.ini          # the instance's public IP, for the first run
+Copy-Item secrets.example.yml secrets.yml              # passwords, tokens, keys, Tailscale auth key
+# the first run joins the tailnet and prints the 100.x address: put it in inventory.ini,
+# remove ssh_allowed_cidrs and terraform apply again to close port 22
 
 # every time (Docker Desktop must be running)
 .\run.ps1 site.yml --check --diff    # dry run

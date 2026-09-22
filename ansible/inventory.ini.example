@@ -1,4 +1,6 @@
-# Copy to inventory.ini and use the public_ip output from terraform.
+# Copy to inventory.ini. The first run uses the public_ip output from terraform
+# (with ssh_allowed_cidrs opening port 22); it joins the server to the tailnet
+# and prints its 100.x address. Put that here, then close port 22 again.
 [ops]
 ops-server ansible_host=203.0.113.10
 
