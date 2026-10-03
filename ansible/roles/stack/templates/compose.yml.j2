@@ -1,5 +1,6 @@
 # Managed by Ansible. Only Caddy publishes ports; every other service is
-# reached through it on the internal "web" network.
+# reached through it on the internal "web" network. The one exception is the
+# Jitsi video bridge: call media is UDP and can't go through a web proxy.
 #
 # restart: always, not unless-stopped. At the 04:30 upgrade reboot on
 # 2026-09-18, Prometheus and Alertmanager handled SIGTERM fast enough to
@@ -63,6 +64,65 @@ services:
     volumes:
       - uptime_kuma_data:/app/data
     networks: [web]
+
+  # --- Video calls for the language school (environment from the jitsi role) ---
+  # Laid out like jitsi/docker-jitsi-meet's own compose file: read-only
+  # containers that generate their config into /run on every start. They talk
+  # on their own network, where prosody must answer to xmpp.meet.jitsi; only
+  # the web front end also joins "web" so Caddy can reach it.
+
+  jitsi-web:
+    image: ghcr.io/jitsi/web:{{ jitsi_version }}
+    restart: always
+    read_only: true
+    tmpfs:
+      - /run:size=16M,mode=1750,exec
+      - /tmp:size=16M,mode=1777,noexec
+    env_file: jitsi.env
+    depends_on: [jitsi-jvb]
+    networks: [web, jitsi]
+
+  # XMPP server: signalling, rooms, and the JWT check.
+  jitsi-prosody:
+    image: ghcr.io/jitsi/prosody:{{ jitsi_version }}
+    restart: always
+    read_only: true
+    tmpfs:
+      - /run:size=16M,mode=1750,exec
+      - /tmp:size=16M,mode=1777,noexec
+    env_file: jitsi.env
+    volumes:
+      - jitsi_prosody_data:/var/lib/prosody
+    networks:
+      jitsi:
+        aliases: [xmpp.meet.jitsi]
+
+  # Conference focus: sets up each call and assigns it to the bridge.
+  jitsi-jicofo:
+    image: ghcr.io/jitsi/jicofo:{{ jitsi_version }}
+    restart: always
+    read_only: true
+    tmpfs:
+      - /run:size=32M,mode=1750,exec
+      - /tmp:size=16M,mode=1777,noexec
+    env_file: jitsi.env
+    depends_on: [jitsi-prosody]
+    networks: [jitsi]
+
+  # Video bridge: relays every participant's audio and video. Clients reach it
+  # directly at the public IP on this port; the firewall role opens it.
+  jitsi-jvb:
+    image: ghcr.io/jitsi/jvb:{{ jitsi_version }}
+    restart: always
+    read_only: true
+    tmpfs:
+      - /run:size=32M,mode=1750,exec
+      - /tmp:size=16M,mode=1777,noexec
+    env_file: jitsi.env
+    ports:
+      - "10000:10000/udp"
+    depends_on: [jitsi-prosody]
+    networks: [jitsi]
 
   # --- Monitoring (configs from the monitoring role) ---
 
@@ -135,6 +195,7 @@ services:
 
 networks:
   web:
+  jitsi:
 
 volumes:
   caddy_data:
@@ -145,3 +206,4 @@ volumes:
   prometheus_data:
   alertmanager_data:
   grafana_data:
+  jitsi_prosody_data:

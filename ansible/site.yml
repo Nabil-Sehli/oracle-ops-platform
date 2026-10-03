@@ -6,7 +6,7 @@
   vars:
     swap_size_mb: 2048
     open_tcp_ports: [80, 443]
-    open_udp_ports: [443]   # HTTP/3
+    open_udp_ports: [443, 10000]   # HTTP/3, Jitsi video bridge
     docker_only_tcp_ports: [9100]   # node_exporter
     auto_reboot_time: "04:30"
 
@@ -27,7 +27,8 @@
     node_exporter_dashboard_revision: 45
     node_exporter_listen: "172.17.0.1:9100"   # docker0, not the public interface
     # An alert fires when one of these is missing for 5 minutes.
-    monitored_containers: [caddy, n8n, llmobs, uptime-kuma, grafana, alertmanager, node-exporter]
+    monitored_containers: [caddy, n8n, llmobs, uptime-kuma, grafana, alertmanager, node-exporter,
+                           jitsi-web, jitsi-prosody, jitsi-jicofo, jitsi-jvb]
 
     # LLM observability. Runs and steps are kept for forensics; the counters
     # behind the Grafana panels are kept forever.
@@ -41,6 +42,15 @@
       claude-sonnet-5: { in: 3.00, out: 15.00 }
     llm_daily_budget_usd: 1.00
     llm_slow_run_seconds: 30
+
+    # Video calls for the language school app. public_ip comes from the
+    # inventory; the JWT secret is shared with the school app's .env.
+    jitsi_version: stable-11248
+    jitsi_domain: meet.deutscheslernzentrum.de
+    jitsi_embed_origins: ["https://deutscheslernzentrum.de"]
+    jitsi_jwt_app_id: dlz
+    jitsi_jicofo_max_memory: 768m
+    jitsi_jvb_max_memory: 2048m
 
     # Before the 04:30 upgrade reboot, so a reboot never interrupts a backup.
     backup_time: "03:15"
@@ -56,5 +66,6 @@
     - docker
     - monitoring
     - llmobs
+    - jitsi
     - stack
     - backup

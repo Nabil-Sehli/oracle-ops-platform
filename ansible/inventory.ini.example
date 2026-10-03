@@ -2,7 +2,8 @@
 # (with ssh_allowed_cidrs opening port 22); it joins the server to the tailnet
 # and prints its 100.x address. Put that here, then close port 22 again.
 [ops]
-ops-server ansible_host=203.0.113.10
+# public_ip: the terraform public_ip output. The Jitsi bridge advertises it to call clients.
+ops-server ansible_host=203.0.113.10 public_ip=203.0.113.10
 
 # Language school production server, used only by school.yml.
 [school]

@@ -1,0 +1,12 @@
+# Config for the Jitsi containers, which live in the stack role's compose file.
+# Runs before the stack role, so the file exists when compose starts them.
+# The images regenerate their own config from this environment on every start,
+# so it is the only file to manage.
+
+# Holds the JWT secret and the internal XMPP passwords.
+- name: Write the Jitsi environment
+  ansible.builtin.template:
+    src: jitsi.env.j2
+    dest: "{{ stack_dir }}/jitsi.env"
+    mode: "0600"
+  notify: Recreate jitsi

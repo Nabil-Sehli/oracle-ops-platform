@@ -1,0 +1,8 @@
+# Handlers run after the stack role, so the containers exist by then.
+# Environment files are read only when a container is created. All four
+# together: they share the XMPP passwords, so a half-updated set can't log in.
+- name: Recreate jitsi
+  ansible.builtin.command: docker compose up -d --force-recreate jitsi-prosody jitsi-jicofo jitsi-jvb jitsi-web
+  args:
+    chdir: "{{ stack_dir }}"
+  changed_when: true

@@ -98,6 +98,16 @@ resource "oci_core_security_list" "public" {
       max = 443
     }
   }
+
+  // Jitsi video bridge media. Calls carry audio/video here, not through Caddy.
+  ingress_security_rules {
+    source   = "0.0.0.0/0"
+    protocol = "17" // UDP
+    udp_options {
+      min = 10000
+      max = 10000
+    }
+  }
 }
 
 resource "oci_core_subnet" "public" {

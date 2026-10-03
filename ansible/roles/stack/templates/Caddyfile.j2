@@ -67,6 +67,15 @@ llmobs.{{ base_domain }} {
 	reverse_proxy llmobs:9109
 }
 
+# Video calls for the language school. Only Jitsi's front end comes through
+# here (the page and XMPP over websocket); audio and video go straight to the
+# bridge on UDP 10000. No outer login: joining needs a token from the school
+# app, which prosody checks, and pupils must never see a password prompt.
+{{ jitsi_domain }} {
+	encode zstd gzip
+	reverse_proxy jitsi-web:8000
+}
+
 # Uptime Kuma admin, behind the same outer login as n8n.
 kuma.{{ base_domain }} {
 	encode zstd gzip
