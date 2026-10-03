@@ -11,6 +11,9 @@ const PUSH_MONITORS = [
 ];
 const MONITORS = [
     ["Language school (deutscheslernzentrum.de)", "https://deutscheslernzentrum.de"],
+    // Prosody's BOSH page, through Caddy and the Jitsi web container: a 200
+    // means the call server is up, not just the static page in front of it.
+    ["School video calls (meet.deutscheslernzentrum.de)", "https://meet.deutscheslernzentrum.de/http-bind"],
     ["CareTrack", "https://caretrack-25m.pages.dev"],
     ["Portfolio", "https://nabil-sehli.github.io/portfolio/"],
     ["n8n automations", "https://n8n.nabil-ops.duckdns.org/healthz"],
@@ -65,16 +68,19 @@ async function main() {
     const ids = [];
     for (const [name, url] of MONITORS) {
         if (byName[name]) { ids.push(byName[name]); console.log("exists:", name); continue; }
+        // Absent only on the very first run, where the Telegram step below
+        // applies the new notification to every monitor.
+        const tg = await findTelegram();
         const res = must(await call("add", {
             type: "http", name, url, method: "GET",
             interval: 60, retryInterval: 60, resendInterval: 0, maxretries: 2, timeout: 48,
             expiryNotification: true, ignoreTls: false, upsideDown: false, maxredirects: 10,
-            accepted_statuscodes: ["200-299"], notificationIDList: {},
+            accepted_statuscodes: ["200-299"], notificationIDList: tg ? { [tg.id]: true } : {},
             kafkaProducerBrokers: [], kafkaProducerSaslOptions: { mechanism: "None" },
             conditions: [], rabbitmqNodes: [], httpBodyEncoding: "json", description: "",
         }), "add " + name);
         ids.push(res.monitorID);
-        console.log("added:", name, res.monitorID);
+        console.log("added:", name, res.monitorID, tg ? "with Telegram" : "WITHOUT Telegram");
     }
 
     const created = await call("addStatusPage", TITLE, SLUG);
