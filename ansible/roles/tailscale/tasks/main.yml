@@ -44,6 +44,7 @@
   register: tailscale_status
   changed_when: false
   failed_when: false
+  check_mode: false   # read-only; without it a --check run can't decide the next task
 
 # The auth key is single-use: once joined, the node's own key keeps it logged
 # in, so this runs on the first deploy only.
@@ -60,6 +61,7 @@
   ansible.builtin.command: tailscale ip -4
   register: tailscale_ip
   changed_when: false
+  check_mode: false
 
 - name: Show the tailnet address
   ansible.builtin.debug:
