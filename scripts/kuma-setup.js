@@ -1,13 +1,15 @@
 // Configures Uptime Kuma (admin, monitors, status page, Telegram). Safe to re-run.
 // ssh ops "cd /opt/ops && docker compose exec -T uptime-kuma sh -c 'cat > /tmp/kuma-setup.js'" < scripts/kuma-setup.js
-// then: docker compose exec -T -e KUMA_USER=nabil -e KUMA_PW=... [-e TG_TOKEN=... -e TG_CHAT=...] [-e BACKUP_PUSH_TOKEN=...] [-e SCHOOL_BACKUP_PUSH_TOKEN=...] uptime-kuma node /tmp/kuma-setup.js
+// then: docker compose exec -T -e KUMA_USER=nabil -e KUMA_PW=... [-e TG_TOKEN=... -e TG_CHAT=...] [-e BACKUP_PUSH_TOKEN=...] [-e SCHOOL_BACKUP_PUSH_TOKEN=...] [-e GOLD_PUSH_TOKEN=...] uptime-kuma node /tmp/kuma-setup.js
 const { io } = require("/app/node_modules/socket.io-client");
 
-const { KUMA_USER, KUMA_PW, TG_TOKEN, TG_CHAT, BACKUP_PUSH_TOKEN, SCHOOL_BACKUP_PUSH_TOKEN } = process.env;
+const { KUMA_USER, KUMA_PW, TG_TOKEN, TG_CHAT, BACKUP_PUSH_TOKEN, SCHOOL_BACKUP_PUSH_TOKEN, GOLD_PUSH_TOKEN } = process.env;
 // Push monitors (dead man's switches), each created only when its token is set.
+// The last field is how many hours of silence count as down.
 const PUSH_MONITORS = [
-    ["Nightly backup", BACKUP_PUSH_TOKEN, "Pinged by ops-backup after each successful run"],
-    ["School backup", SCHOOL_BACKUP_PUSH_TOKEN, "Pinged by dlz-offsite on the school server after each upload"],
+    ["Nightly backup", BACKUP_PUSH_TOKEN, "Pinged by ops-backup after each successful run", 26],
+    ["School backup", SCHOOL_BACKUP_PUSH_TOKEN, "Pinged by dlz-offsite on the school server after each upload", 26],
+    ["Gold CRT alert", GOLD_PUSH_TOKEN, "Pinged by goldcrt after every hourly check, weekends included", 3],
 ];
 const MONITORS = [
     ["Language school (deutscheslernzentrum.de)", "https://deutscheslernzentrum.de"],
@@ -108,15 +110,15 @@ async function main() {
         console.log("test alert sent");
     }
 
-    // Dead man's switches: go DOWN (and alert) when no ping arrives for 26 h.
+    // Dead man's switches: go DOWN (and alert) when no ping arrives in time.
     // Kept off the public status page.
-    for (const [name, token, description] of PUSH_MONITORS) {
+    for (const [name, token, description, hours] of PUSH_MONITORS) {
         if (!token) continue;
         if (byName[name]) { console.log("exists:", name); continue; }
         const tg = await findTelegram();
         const res = must(await call("add", {
             type: "push", name, pushToken: token,
-            interval: 26 * 3600, retryInterval: 3600, resendInterval: 0, maxretries: 0,
+            interval: hours * 3600, retryInterval: 3600, resendInterval: 0, maxretries: 0,
             upsideDown: false, accepted_statuscodes: ["200-299"],
             notificationIDList: tg ? { [tg.id]: true } : {},
             kafkaProducerBrokers: [], kafkaProducerSaslOptions: { mechanism: "None" },

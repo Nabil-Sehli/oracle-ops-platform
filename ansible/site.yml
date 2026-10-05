@@ -14,7 +14,7 @@
     stack_dir: /opt/ops
     timezone: Europe/Berlin
     caddy_version: "2.11.4"
-    python_version: "3.13"   # base image for the llmobs collector
+    python_version: "3.13"   # base image for the llmobs collector and goldcrt
     n8n_version: "2.39.6"
     uptime_kuma_version: "2.5.5"
     status_page_slug: ops
@@ -27,7 +27,7 @@
     node_exporter_dashboard_revision: 45
     node_exporter_listen: "172.17.0.1:9100"   # docker0, not the public interface
     # An alert fires when one of these is missing for 5 minutes.
-    monitored_containers: [caddy, n8n, llmobs, uptime-kuma, grafana, alertmanager, node-exporter,
+    monitored_containers: [caddy, n8n, llmobs, goldcrt, uptime-kuma, grafana, alertmanager, node-exporter,
                            jitsi-web, jitsi-prosody, jitsi-jicofo, jitsi-jvb]
 
     # LLM observability. Runs and steps are kept for forensics; the counters
@@ -66,6 +66,7 @@
     - docker
     - monitoring
     - llmobs
+    - goldcrt
     - jitsi
     - stack
     - backup

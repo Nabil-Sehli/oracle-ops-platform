@@ -22,6 +22,7 @@ Uptime Kuma, Grafana) sit behind a login.
 | **Grafana** | Dashboards, provisioned from this repo rather than saved in the UI. |
 | **llmobs** | A ~600-line collector that turns every n8n run into a trace, Prometheus metrics and a spend figure. Answers *which node broke*, not just *a run failed*. |
 | **Jitsi Meet** | Video calls for a language school, embedded in its site. Only the school app's members get in: the app signs a short-lived token per room, and the server refuses anyone without one. Media goes straight to the bridge on UDP 10000; only the web front end sits behind Caddy. |
+| **goldcrt** | Telegram alerts for a 1-hour gold trading setup, ported from a TradingView indicator because TradingView's free plan sends no indicator alerts. Cleans the feed's filler candles from closed-market hours; its signal count matches the indicator to within 1% over 10,400 candles. A Kuma push monitor alerts if it stops. |
 | **restic** | Nightly encrypted backups to Backblaze B2, plus a monthly automated restore drill. |
 
 ## Layout
@@ -29,7 +30,7 @@ Uptime Kuma, Grafana) sit behind a login.
 ```
 terraform/                  VCN, subnet, security list, Ampere A1 instance
 ansible/
-  site.yml                  the ops server: base, ssh, firewall, tailscale, fail2ban, docker, monitoring, llmobs, jitsi, stack, backup
+  site.yml                  the ops server: base, ssh, firewall, tailscale, fail2ban, docker, monitoring, llmobs, goldcrt, jitsi, stack, backup
   school.yml                off-site backups for a second, pre-existing production server
   run.ps1                   runs ansible-playbook in a container (no Ansible on Windows)
   roles/
@@ -38,6 +39,7 @@ ansible/
     docker                       engine, log rotation
     monitoring                   Prometheus, Alertmanager, Grafana configs and dashboards
     llmobs                       LLM run collector: forensics UI, metrics, cost, Grafana dashboard
+    goldcrt                      hourly gold setup check, Telegram alerts (standard-library Python)
     jitsi                        Jitsi Meet environment: JWT auth, bridge address behind 1:1 NAT, embed origin
     stack                        compose file, Caddyfile, service environment
     backup                       restic, systemd timers, restore drill

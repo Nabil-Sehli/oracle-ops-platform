@@ -55,6 +55,22 @@ services:
       start_period: 10s
     networks: [web]
 
+  # Gold CRT alert (role goldcrt): once an hour it replays the 1H XAUUSD
+  # candles and sends Telegram a message on a sweep setup. Same stock image
+  # and bind-mount pattern as llmobs. It only makes outbound calls; "web" is
+  # there so it can reach Kuma's push endpoint.
+  goldcrt:
+    image: python:{{ python_version }}-alpine
+    restart: always
+    command: ["python", "-u", "/app/goldcrt.py"]
+    env_file: goldcrt.env
+    volumes:
+      - ./goldcrt:/app:ro
+      - goldcrt_data:/data
+      # The host's time zone files, so the message shows Berlin time.
+      - /usr/share/zoneinfo:/usr/share/zoneinfo:ro
+    networks: [web]
+
   uptime-kuma:
     image: louislam/uptime-kuma:{{ uptime_kuma_version }}
     restart: always
@@ -202,6 +218,7 @@ volumes:
   caddy_config:
   n8n_data:
   llmobs_data:
+  goldcrt_data:
   uptime_kuma_data:
   prometheus_data:
   alertmanager_data:

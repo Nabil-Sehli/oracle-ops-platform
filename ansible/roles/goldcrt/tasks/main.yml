@@ -1,0 +1,23 @@
+# Gold CRT alert for Nabil's brother: Telegram messages when a 1H XAUUSD candle
+# sweeps the previous candle into a key level. The service lives in the stack
+# role's compose file; this runs first so its files exist when compose starts it.
+- name: Create the goldcrt directory
+  ansible.builtin.file:
+    path: "{{ stack_dir }}/goldcrt"
+    state: directory
+    mode: "0755"
+
+- name: Install the alert service
+  ansible.builtin.copy:
+    src: goldcrt.py
+    dest: "{{ stack_dir }}/goldcrt/goldcrt.py"
+    mode: "0644"
+  notify: Restart goldcrt
+
+# Holds the Twelve Data key and the Telegram token, so it is not world-readable.
+- name: Write the goldcrt environment
+  ansible.builtin.template:
+    src: goldcrt.env.j2
+    dest: "{{ stack_dir }}/goldcrt.env"
+    mode: "0600"
+  notify: Recreate goldcrt
