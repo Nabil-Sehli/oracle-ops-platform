@@ -12,6 +12,14 @@ few thousand H1 candles from Twelve Data, replays the rules over all of them
 closed. Over the 10,400 candles to 2 Oct 2026 it gave 301 buys / 293 sells;
 the indicator on TradingView's OANDA:XAUUSD chart gave 305 / 283.
 
+Strong signals also carry a trade setup to review: entry at the middle of
+candle 2, stop loss just beyond its wick, take profit at the other end of
+candle 1. A signal is strong when candle 2 closes with the 200 EMA trend and
+the setup pays at least 1.5 times the risk. Backtest on 11,000 candles
+(Nov 2024 - Oct 2026), the entry a limit order valid for 3 candles: 184
+strong setups, 135 filled, 41% reached TP first, +0.30R per trade before the
+spread. The other signals traded the same way lost 0.11R per trade.
+
     python goldcrt.py                 run the service
     python goldcrt.py backtest 5000   replay N candles and print the signals
 """
@@ -46,6 +54,10 @@ class Settings:
     swing_len: int = 5
     fvg_min_atr: float = 0.1
     max_age: int = 500
+    trend_len: int = 200            # strong setups close with this EMA's trend
+    min_rr: float = 1.5             # and pay at least this much per unit of risk
+    sl_room_atr: float = 0.05       # stop loss this far beyond candle 2's wick, × ATR
+    fill_bars: int = 3              # the entry order stays valid this many candles
 
     def kind_on(self, kind):
         return {"FVG": self.use_fvg, "IFVG": self.use_ifvg, "OB": self.use_ob, "BB": self.use_bb}.get(kind, False)
@@ -91,6 +103,12 @@ class Signal:
     c1_low: float = 0.0
     wick: float = 0.0
     close: float = 0.0
+    entry: float = 0.0
+    sl: float = 0.0
+    tp: float = 0.0
+    rr: float = 0.0
+    with_trend: bool = False
+    strong: bool = False
 
 
 def _ny_offset(dt):
@@ -170,6 +188,7 @@ def run(bars, cfg=None):
     ph_broken = pl_broken = True
     d_hi = d_lo = w_hi = w_lo = None
     atr, tr_first = None, []
+    ema, alpha = None, 2 / (cfg.trend_len + 1)
 
     for i, b in enumerate(bars):
         p = bars[i - 1] if i > 0 else None
@@ -187,6 +206,9 @@ def run(bars, cfg=None):
         else:
             atr = (atr * 13 + tr) / 14
         tol = atr * cfg.tol_atr if atr is not None else None
+        # ta.ema(close, 200). The seed differs from Pine's, which no longer
+        # matters after the thousands of candles replayed before a signal.
+        ema = b.c if ema is None else ema + (b.c - ema) * alpha
 
         # ta.pivothigh / ta.pivotlow(L, L): confirmed L bars after the pivot.
         ph = pl = None
@@ -249,8 +271,18 @@ def run(bars, cfg=None):
                         tags.append("PWH")
                         info.append(f"Previous week high {pwh:.2f}")
                 if tags:
+                    # Trade setup: entry at the middle of candle 2 (its close
+                    # when that is better), SL beyond the wick, TP at the other
+                    # end of candle 1.
+                    mid = (b.h + b.l) / 2
+                    entry = min(mid, b.c) if d == 1 else max(mid, b.c)
+                    sl = b.l - cfg.sl_room_atr * atr if d == 1 else b.h + cfg.sl_room_atr * atr
+                    tp = p.h if d == 1 else p.l
+                    rr = (tp - entry) / (entry - sl)
+                    with_trend = b.c > ema if d == 1 else b.c < ema
                     signals.append(Signal(i, b.t, "BUY" if d == 1 else "SELL", tags, info,
-                                          p.h, p.l, b.l if d == 1 else b.h, b.c))
+                                          p.h, p.l, b.l if d == 1 else b.h, b.c,
+                                          entry, sl, tp, rr, with_trend, with_trend and rr >= cfg.min_rr))
 
         # ── 2. Update the key levels with candle 2 ──
         # A close through the far side kills a zone; FVG flips to IFVG, OB to BB.
@@ -362,16 +394,34 @@ def local_time(ts):
         return datetime.fromtimestamp(ts, UTC)
 
 
-def message(s):
+def message(s, cfg=None):
+    cfg = cfg or Settings()
     start = local_time(s.t)
     end = start + timedelta(hours=1)
-    head = "🟢 BUY CRT" if s.side == "BUY" else "🔴 SELL CRT"
-    wick = "Wick low" if s.side == "BUY" else "Wick high"
-    return (f"{head} · XAUUSD 1H\n"
+    buy = s.side == "BUY"
+    head = ("🟢 BUY CRT" if buy else "🔴 SELL CRT") if not s.strong else ("⭐ STRONG BUY" if buy else "⭐ STRONG SELL")
+    wick = "Wick low" if buy else "Wick high"
+    text = (f"{head} · XAUUSD 1H\n"
             f"Candle {start:%a %d %b %H:%M}–{end:%H:%M}\n"
             f"Swept: {', '.join(s.info)}\n"
             f"CRT high {s.c1_high:.2f} | CRT low {s.c1_low:.2f}\n"
             f"{wick} {s.wick:.2f} | Close {s.close:.2f}")
+    if not s.strong:
+        why = [] if s.with_trend else [f"against the trend ({'below' if buy else 'above'} the {cfg.trend_len} EMA)"]
+        if s.rr < cfg.min_rr:
+            why.append(f"R:R only 1:{s.rr:.1f}")
+        return text + "\nNot a strong setup: " + ", ".join(why)
+    limit = s.entry != s.close
+    order = ("buy" if buy else "sell") + (" limit" if limit else " at market")
+    until = end + timedelta(hours=cfg.fill_bars)
+    text += (f"\n\n📋 Trade setup: {order}\n"
+             f"Entry {s.entry:.2f}\n"
+             f"SL {s.sl:.2f} (risk {abs(s.entry - s.sl):.2f})\n"
+             f"TP {s.tp:.2f} (reward {abs(s.tp - s.entry):.2f})\n"
+             f"R:R 1:{s.rr:.1f} · with the trend ({'above' if buy else 'below'} the {cfg.trend_len} EMA)")
+    if limit:
+        text += f"\nCancel the order if it hasn't filled by {until:%H:%M}, or once price reaches the TP."
+    return text
 
 
 def send(text):
@@ -467,7 +517,7 @@ def backtest(count):
     buys = sum(s.side == "BUY" for s in sigs)
     print(f"{len(bars)} candles {datetime.fromtimestamp(bars[0].t, UTC):%Y-%m-%d} .. "
           f"{datetime.fromtimestamp(bars[-1].t, UTC):%Y-%m-%d %H:%M}Z | buys {buys} | sells {len(sigs) - buys} | "
-          f"per 23 bars {len(sigs) * 23 / len(bars):.2f}")
+          f"strong {sum(s.strong for s in sigs)} | per 23 bars {len(sigs) * 23 / len(bars):.2f}")
     for s in sigs[-8:]:
         print("---\n" + message(s))
 
