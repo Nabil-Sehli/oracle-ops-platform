@@ -56,7 +56,8 @@ services:
     networks: [web]
 
   # Gold CRT alert (role goldcrt): once an hour it replays the 1H XAUUSD
-  # candles and sends Telegram a message on a sweep setup. Same stock image
+  # candles and sends Telegram a message on a strong sweep setup that the
+  # 1m candles confirm with a change of character. Same stock image
   # and bind-mount pattern as llmobs. It only makes outbound calls; "web" is
   # there so it can reach Kuma's push endpoint.
   goldcrt:

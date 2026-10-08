@@ -1,5 +1,6 @@
 """Gold CRT sweep alert: a Telegram message when a 1H XAUUSD candle sweeps the
-previous candle's high or low into a key level and closes back inside it.
+previous candle's high or low into a key level and closes back inside it, the
+setup is strong, and the 1m candles confirm it with a change of character.
 
 The rules are a line-by-line port of the TradingView indicator
 crt_sweep_alert.pine (Desktop\\gold-crt-alert). Keep the two in step: the
@@ -12,16 +13,22 @@ few thousand H1 candles from Twelve Data, replays the rules over all of them
 closed. Over the 10,400 candles to 2 Oct 2026 it gave 301 buys / 293 sells;
 the indicator on TradingView's OANDA:XAUUSD chart gave 305 / 283.
 
-Strong signals also carry a trade setup to review: entry at the middle of
-candle 2, stop loss just beyond its wick, take profit at the other end of
-candle 1. A signal is strong when candle 2 closes with the 200 EMA trend and
-the setup pays at least 1.5 times the risk. Backtest on 11,000 candles
-(Nov 2024 - Oct 2026), the entry a limit order valid for 3 candles: 184
-strong setups, 135 filled, 41% reached TP first, +0.30R per trade before the
-spread. The other signals traded the same way lost 0.11R per trade.
+Only strong signals are sent: candle 2 closes with the 200 EMA trend, the
+setup pays at least 1.5 times the risk, and candle 1's range is at least one
+ATR (a big CRT range, so the TP is worth it). Then the 1m candles of candle 2
+must show a change of character after the sweep (find_choch). Each alert
+carries a trade setup: entry at the middle of candle 2, stop loss just beyond
+its wick, take profit at the other end of candle 1.
+
+Backtest on 11,000 candles (Nov 2024 - Oct 2026), trades followed on 1m
+candles, the entry a limit order valid for 3 candles: 76 alerts, 56 filled,
+48% reached TP first, +0.54R per trade before the spread. Before the 1m check
+and the candle 1 size rule (v3): 184 alerts, +0.30R per trade. Either rule on
+its own gave +0.32 to +0.34R; only the two together did better, on a small
+sample, so expect less live.
 
     python goldcrt.py                 run the service
-    python goldcrt.py backtest 5000   replay N candles and print the signals
+    python goldcrt.py backtest 5000   replay N candles, check the last strong ones on 1m
 """
 
 import json
@@ -56,8 +63,11 @@ class Settings:
     max_age: int = 500
     trend_len: int = 200            # strong setups close with this EMA's trend
     min_rr: float = 1.5             # and pay at least this much per unit of risk
+    min_c1_atr: float = 1.0         # and candle 1's range is at least this, × ATR
     sl_room_atr: float = 0.05       # stop loss this far beyond candle 2's wick, × ATR
     fill_bars: int = 3              # the entry order stays valid this many candles
+    choch_len: int = 5              # 1m swing size for the change of character
+    need_choch: bool = True         # only send trades a 1m CHoCH confirmed
 
     def kind_on(self, kind):
         return {"FVG": self.use_fvg, "IFVG": self.use_ifvg, "OB": self.use_ob, "BB": self.use_bb}.get(kind, False)
@@ -109,6 +119,7 @@ class Signal:
     rr: float = 0.0
     with_trend: bool = False
     strong: bool = False
+    choch: dict = None      # the 1m change of character, once confirm() found it
 
 
 def _ny_offset(dt):
@@ -280,9 +291,10 @@ def run(bars, cfg=None):
                     tp = p.h if d == 1 else p.l
                     rr = (tp - entry) / (entry - sl)
                     with_trend = b.c > ema if d == 1 else b.c < ema
+                    big = p.h - p.l >= cfg.min_c1_atr * atr
                     signals.append(Signal(i, b.t, "BUY" if d == 1 else "SELL", tags, info,
                                           p.h, p.l, b.l if d == 1 else b.h, b.c,
-                                          entry, sl, tp, rr, with_trend, with_trend and rr >= cfg.min_rr))
+                                          entry, sl, tp, rr, with_trend, with_trend and rr >= cfg.min_rr and big))
 
         # ── 2. Update the key levels with candle 2 ──
         # A close through the far side kills a zone; FVG flips to IFVG, OB to BB.
@@ -353,6 +365,52 @@ def run(bars, cfg=None):
     return signals
 
 
+# ── 1m confirmation: change of character after the sweep ───────────────────
+def find_choch(minutes, s, swing=3):
+    """The 1m change of character inside candle 2, or None. Sell: after
+    candle 2's highest 1m high beyond candle 1's high, a 1m candle closes
+    below the last 1m swing low made before that high. Buy: the mirror image.
+    A swing low is below the `swing` candles before it and not above the
+    `swing` candles after it, so it is known `swing` candles later. Same rules
+    as the indicator's 1m watch. `minutes` start a few hours before candle 2."""
+    d = 1 if s.side == "BUY" else -1
+    rows = [m for m in minutes if m.t < s.t + 3600]
+    swings = []         # (index, price, time) of the swing lows (sell) / highs (buy)
+    ext = ext_i = hit = None
+    for i, m in enumerate(rows):
+        k = i - swing
+        if k - swing >= 0:
+            p = rows[k].l if d == -1 else rows[k].h
+            before = [rows[j].l if d == -1 else rows[j].h for j in range(k - swing, k)]
+            after = [rows[j].l if d == -1 else rows[j].h for j in range(k + 1, i + 1)]
+            if d == -1 and all(p < x for x in before) and all(p <= x for x in after):
+                swings.append((k, p, rows[k].t))
+            if d == 1 and all(p > x for x in before) and all(p >= x for x in after):
+                swings.append((k, p, rows[k].t))
+        if m.t >= s.t:
+            # Every new extreme beyond candle 1 restarts the watch.
+            x = m.h if d == -1 else m.l
+            if (x > s.c1_high if d == -1 else x < s.c1_low) and (ext is None or (x >= ext if d == -1 else x <= ext)):
+                ext, ext_i, hit = x, i, None
+        if ext_i is not None and hit is None:
+            prior = [sw for sw in swings if sw[0] < ext_i]
+            if prior and (m.c < prior[-1][1] if d == -1 else m.c > prior[-1][1]):
+                hit = {"level": prior[-1][1], "swing_t": prior[-1][2], "t": m.t}
+    return hit
+
+
+def confirm(s, cfg):
+    """Fetch candle 2's 1m candles and look for the CHoCH. Twelve Data can
+    take a minute to publish the last one, so wait for it a little."""
+    for attempt in range(4):
+        minutes = fetch_minutes(s.t - 4 * 3600, s.t + 3600)
+        if (minutes and minutes[-1].t >= s.t + 3540) or attempt == 3:
+            break
+        time.sleep(20)
+    s.choch = find_choch(minutes, s, cfg.choch_len)
+    return s.choch is not None
+
+
 # ── Data: Twelve Data XAU/USD spot candles ─────────────────────────────────
 # OANDA would match TradingView's OANDA:XAUUSD chart exactly, but its EU demo
 # accounts are MT5-only, with no API. Twelve Data's free plan allows 800
@@ -385,6 +443,27 @@ def fetch_candles(count):
     return tag_sessions(out)[-count:]
 
 
+def fetch_minutes(start, end):
+    """1-minute candles opening from `start` to before `end` (unix seconds),
+    in trading hours, oldest first."""
+    fmt = "%Y-%m-%d %H:%M:%S"
+    q = {"symbol": os.environ.get("GOLD_SYMBOL", "XAU/USD"), "interval": "1min", "timezone": "UTC",
+         "start_date": datetime.fromtimestamp(start, UTC).strftime(fmt),
+         "end_date": datetime.fromtimestamp(end, UTC).strftime(fmt),
+         "order": "ASC", "outputsize": 5000, "apikey": os.environ["TWELVEDATA_KEY"]}
+    with urllib.request.urlopen(f"https://api.twelvedata.com/time_series?{urllib.parse.urlencode(q)}",
+                                timeout=30) as r:
+        data = json.load(r)
+    if data.get("status") != "ok":
+        raise RuntimeError(f"twelvedata: {data.get('message', data)}")
+    out = []
+    for v in data["values"]:
+        t = int(datetime.strptime(v["datetime"], fmt).replace(tzinfo=UTC).timestamp())
+        if start <= t < end and in_session(t):
+            out.append(Bar(t, float(v["open"]), float(v["high"]), float(v["low"]), float(v["close"])))
+    return out
+
+
 # ── Telegram ───────────────────────────────────────────────────────────────
 def local_time(ts):
     try:
@@ -399,18 +478,15 @@ def message(s, cfg=None):
     start = local_time(s.t)
     end = start + timedelta(hours=1)
     buy = s.side == "BUY"
-    head = ("🟢 BUY CRT" if buy else "🔴 SELL CRT") if not s.strong else ("⭐ STRONG BUY" if buy else "⭐ STRONG SELL")
     wick = "Wick low" if buy else "Wick high"
-    text = (f"{head} · XAUUSD 1H\n"
+    text = (f"⭐ {s.side} · XAUUSD 1H, confirmed on 1m\n"
             f"Candle {start:%a %d %b %H:%M}–{end:%H:%M}\n"
             f"Swept: {', '.join(s.info)}\n"
             f"CRT high {s.c1_high:.2f} | CRT low {s.c1_low:.2f}\n"
             f"{wick} {s.wick:.2f} | Close {s.close:.2f}")
-    if not s.strong:
-        why = [] if s.with_trend else [f"against the trend ({'below' if buy else 'above'} the {cfg.trend_len} EMA)"]
-        if s.rr < cfg.min_rr:
-            why.append(f"R:R only 1:{s.rr:.1f}")
-        return text + "\nNot a strong setup: " + ", ".join(why)
+    if s.choch:
+        text += (f"\n1m CHoCH at {local_time(s.choch['t']):%H:%M}: close {'above' if buy else 'below'} "
+                 f"the 1m swing {'high' if buy else 'low'} {s.choch['level']:.2f}")
     limit = s.entry != s.close
     order = ("buy" if buy else "sell") + (" limit" if limit else " at market")
     until = end + timedelta(hours=cfg.fill_bars)
@@ -479,14 +555,24 @@ def check(state, count):
     if latest <= state["last_bar"]:
         return "no new candle (market closed?)"
     # Signals on candles closed since the last check, at most two hours back,
-    # so an outage never floods the chat with stale setups.
-    fresh = [s for s in run(bars) if s.t > state["last_bar"] and s.t >= latest - 2 * 3600]
+    # so an outage never floods the chat with stale setups. Only strong ones
+    # the 1m chart confirmed are sent.
+    cfg = Settings()
+    fresh = [s for s in run(bars, cfg) if s.t > state["last_bar"] and s.t >= latest - 2 * 3600]
+    sent = 0
     for s in fresh:
-        log(f"signal {s.side} {s.t} {s.tags}")
-        send(message(s))
+        if not s.strong:
+            log(f"skip {s.side} {s.t} {s.tags}: not strong (trend {s.with_trend}, R:R {s.rr:.1f}, "
+                f"candle 1 {s.c1_high - s.c1_low:.2f})")
+        elif cfg.need_choch and not confirm(s, cfg):
+            log(f"skip {s.side} {s.t} {s.tags}: no 1m CHoCH")
+        else:
+            log(f"signal {s.side} {s.t} {s.tags} choch {s.choch}")
+            send(message(s, cfg))
+            sent += 1
     state["last_bar"] = latest
     save_state(state)
-    return f"checked candle {latest}, {len(fresh)} signal(s)"
+    return f"checked candle {latest}, {sent} alert(s), {len(fresh) - sent} skipped"
 
 
 def main():
@@ -512,14 +598,21 @@ def main():
 
 
 def backtest(count):
+    cfg = Settings()
     bars = fetch_candles(count)
-    sigs = run(bars)
+    sigs = run(bars, cfg)
+    strong = [s for s in sigs if s.strong]
     buys = sum(s.side == "BUY" for s in sigs)
     print(f"{len(bars)} candles {datetime.fromtimestamp(bars[0].t, UTC):%Y-%m-%d} .. "
           f"{datetime.fromtimestamp(bars[-1].t, UTC):%Y-%m-%d %H:%M}Z | buys {buys} | sells {len(sigs) - buys} | "
-          f"strong {sum(s.strong for s in sigs)} | per 23 bars {len(sigs) * 23 / len(bars):.2f}")
-    for s in sigs[-8:]:
-        print("---\n" + message(s))
+          f"strong {len(strong)} | per 23 bars {len(sigs) * 23 / len(bars):.2f}")
+    # The 1m check costs a Twelve Data request per setup: only the last few.
+    for s in strong[-5:]:
+        if confirm(s, cfg):
+            print("---\n" + message(s, cfg))
+        else:
+            print(f"--- {s.side} {local_time(s.t):%a %d %b %H:%M}: no 1m CHoCH, not sent")
+        time.sleep(8)       # free plan: 8 requests a minute
 
 
 if __name__ == "__main__":
